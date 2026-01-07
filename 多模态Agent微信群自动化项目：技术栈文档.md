@@ -1,8 +1,8 @@
 技术栈文档 (LangGraph版)
 1. 开发与运行时环境
-操作系统：推荐 Linux (Ubuntu 22.04 LTS) 或 WSL2 (Windows)
+操作系统：Windows
 
-Python：3.10+ (建议 3.11+ 以获得更好的异步支持)
+Python：3.12
 
 容器运行时：Docker 24.0+, Docker Compose 2.20+
 
@@ -18,10 +18,10 @@ Web框架	FastAPI	0.104+	构建对外HTTP服务（Orchestrator管理API、健康
 消息总线	Redis	7.2+	用途调整：主要用于系统级事件通知（如“任务完成”）、缓存以及跨工作流会话的锁，而非细粒度Agent间消息传递。
 2.2 AI与多模态核心
 组件	具体技术/库	版本/说明	用途与影响
-大模型服务	Ollama	最新版	本地部署和运行 Qwen2-VL (视觉语言模型) 和 Qwen3-Embedding-8B (嵌入模型)。
+大模型服务	Ollama	最新版	本地部署和运行 Qwen3-VL (视觉语言模型) 和 Qwen3-Embedding-4B (嵌入模型)。
 向量数据库	Chroma	0.4.18+	核心变更。轻量级、嵌入式向量数据库，与LangChain生态集成度极高，简化RAG实现。
-嵌入模型	Qwen/Qwen3-Embedding-8B	via Ollama	核心变更。通过Ollama拉取并运行此嵌入模型，用于将业务知识库文本转换为向量，存入Chroma。
-多模态处理	PIL / OpenCV	最新版	图像预处理，为Qwen2-VL模型准备截图数据。
+嵌入模型	Qwen/Qwen3-Embedding-4B	via Ollama	核心变更。通过Ollama拉取并运行此嵌入模型，用于将业务知识库文本转换为向量，存入Chroma。
+多模态处理	PIL / OpenCV	最新版	图像预处理，为Qwen3-VL模型准备截图数据。
 RAG检索链	LangChain Expression Language (LCEL)	-	用于流畅地组合检索、上下文构建、提示、模型调用等步骤，构建高效的RAG流程。
 2.3 微信沙盒与自动化
 组件	具体技术/库	版本	用途说明
@@ -101,8 +101,8 @@ langgraph:
 ai:
   ollama:
     base_url: "http://localhost:11434"
-    vision_model: "qwen2-vl:latest"        # 多模态模型
-    embedding_model: "qwen3-embedding-8b"  # **变更：嵌入模型**
+    vision_model: "qwen3-vl-8b:latest"        # 多模态模型
+    embedding_model: "qwen3-embedding-4b"  # **变更：嵌入模型**
 
 # 向量数据库与知识库配置
 vector_store:
@@ -205,8 +205,8 @@ def create_workflow():
 拉取模型：
 
 bash
-ollama pull qwen2-vl:latest
-ollama pull qwen3-embedding-8b
+ollama pull qwen3-vl:latest
+ollama pull qwen3-embedding-4b
 初始化知识库：运行 scripts/init_knowledge_base.py，将业务文档灌入Chroma。
 
 构建并启动微信沙盒。

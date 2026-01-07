@@ -86,7 +86,7 @@ Multimodal Node：
 
 调用Ollama中的Qwen3-VL模型进行理解和分类。
 
-调用Tool：通过Qwen3-Embedding-8B与Chroma进行RAG检索，增强业务上下文。
+调用Tool：通过Qwen3-Embedding-4B与Chroma进行RAG检索，增强业务上下文。
 
 将结构化结果写回State的multimodal_analysis字段。
 
@@ -122,7 +122,7 @@ Document Node：
 
 AI与知识库服务：
 
-Ollama：提供Qwen3-VL和Qwen3-Embedding-8B模型服务。
+Ollama：提供Qwen3-VL和Qwen3-Embedding-4B模型服务。
 
 Chroma向量数据库：存储业务知识嵌入，通过LangChain集成，在Multimodal Node中被调用以完成RAG检索。
 
@@ -164,7 +164,7 @@ StateTracker Node: 更新状态，并决定下一步
 
 LangGraph：实现了本架构的核心工作流引擎。
 
-Chroma + Qwen3-Embedding-8B：作为Multimodal Node中的检索增强组件。
+Chroma + Qwen3-Embedding-4B：作为Multimodal Node中的检索增强组件。
 
 LangChain & Tools：提供了节点与模型、工具、向量数据库交互的标准方式。
 
