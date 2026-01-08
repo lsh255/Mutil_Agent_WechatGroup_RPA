@@ -1,0 +1,18 @@
+# 工作报告
+
+**用户**: {{ user }}
+**任务ID**: {{ task_id }}
+**生成时间**: {{ timestamp }}
+
+## 任务摘要
+
+{{ summary }}
+
+## 详细信息
+
+{% for key, value in extracted_info.items() %}
+**{{ key }}**: {{ value }}
+{% endfor %}
+
+---
+*本报告由微信工作流Agent自动生成*

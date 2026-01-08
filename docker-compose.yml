@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # Redis服务：用于状态存储和缓存
+  redis:
+    image: redis:7.2-alpine  # Redis镜像版本
+    container_name: wechat-redis  # 容器名称
+    ports:
+      - "6379:6379"  # 端口映射：主机端口:容器端口
+    volumes:
+      - redis_data:/data  # 数据卷挂载
+    command: redis-server --appendonly yes  # 启动命令：启用AOF持久化
+    restart: unless-stopped  # 重启策略：除非手动停止否则自动重启
+
+  # Ollama服务：本地AI模型服务
+  ollama:
+    image: ollama/ollama:latest  # Ollama最新镜像
+    container_name: wechat-ollama  # 容器名称
+    ports:
+      - "11434:11434"  # 端口映射：Ollama API端口
+    volumes:
+      - ollama_data:/root/.ollama  # 模型数据持久化
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1  # 环境变量：保持模型常驻内存
+    restart: unless-stopped  # 重启策略
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia  # GPU驱动
+              count: 1  # GPU数量
+              capabilities: [gpu]  # GPU能力
+
+# 数据卷定义
+volumes:
+  redis_data:  # Redis数据卷
+  ollama_data:  # Ollama模型数据卷

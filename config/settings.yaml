@@ -1,0 +1,45 @@
+# 项目基础配置
+project:
+  name: "wechat-workflow-agent"  # 项目名称
+  env: "development"  # 运行环境：development/production
+
+# LangGraph工作流配置
+langgraph:
+  state_store: "redis://localhost:6379/0"  # 状态存储后端地址
+  checkpoint_enabled: true  # 是否启用检查点功能
+
+# AI模型服务配置
+ai:
+  ollama:
+    base_url: "http://localhost:11434"  # Ollama服务地址
+    vision_model: "qwen3-vl-8b:latest"  # 视觉语言模型
+    embedding_model: "qwen3-embedding-4b"  # 嵌入模型
+
+# 向量数据库配置
+vector_store:
+  type: "chroma"  # 向量数据库类型
+  persist_directory: "./data/chroma_db"  # 持久化存储目录
+  collection_name: "work_knowledge_base"  # 集合名称
+
+# 微信沙盒配置
+wechat_sandbox:
+  docker_image: "wechat-sandbox:latest"  # Docker镜像名称
+  producer_service_url: "http://localhost:6789"  # 生产者服务地址
+  data_volume: "./data/wechat_profile"  # 数据卷挂载路径
+
+# 工具配置
+tools:
+  excel_template_path: "./templates/task_log.xlsx"  # Excel模板文件路径
+  report_template_path: "./templates/daily_report.j2"  # 报告模板文件路径
+  output_dir: "./output"  # 输出目录
+
+# Redis配置
+redis:
+  host: "localhost"  # Redis主机地址
+  port: 6379  # Redis端口
+  lock_db: 1  # 锁数据库编号
+
+# 日志配置
+logging:
+  level: "INFO"  # 日志级别：DEBUG/INFO/WARNING/ERROR
+  format: "json"  # 日志格式：json/text
