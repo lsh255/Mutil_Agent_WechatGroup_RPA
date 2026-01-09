@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Redis服务：用于状态存储和缓存
   redis:

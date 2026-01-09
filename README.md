@@ -71,7 +71,8 @@ wechat-workflow-ai-agent/
 
 ```bash
 # 1. 创建并激活Conda环境
-scripts\setup_conda_env.bat
+conda create -n wechat-workflow-agent python=3.12
+
 
 # 2. 激活环境（如果需要）
 conda activate wechat-workflow-agent
