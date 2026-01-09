@@ -46,7 +46,7 @@
 | 桌面自动化 | PyAutoGUI | 0.9+ | 在沙盒容器内部进行模拟操作（点击、滚动等）。 |
 | 图像处理 | OpenCV-Python | 4.8+ | 图像匹配、模板匹配、ROI区域检测。 |
 | 生产者服务 | FastAPI + SSE | - | 容器内服务，用于流式输出消息和提供API接口。 |
-| VNC服务 | noVNC | 最新版 | 提供浏览器远程访问微信界面的能力。 |
+| VNC服务 | noVNC + x11vnc | 最新版 | noVNC 提供浏览器远程访问，x11vnc 提供 VNC 客户端访问。 |
 | 屏幕变化检测 | 自定义ChangeDetector | - | 使用dHash算法和HSV颜色空间检测屏幕变化。 |
 | 消息类型分类 | 自定义MessageTypeClassifier | - | 基于图像特征识别消息类型（文本、图片、链接等）。 |
 
@@ -113,6 +113,9 @@ wechat-workflow-ai-agent/
 │   │   └── static/
 │   └── wechat_sandbox/                 # 微信沙盒
 │       ├── Dockerfile
+│       ├── build/                      # 镜像构建依赖文件目录
+│       │   ├── fonts-noto-cjk_20240730+repack1-1_all.deb  # Noto CJK 字体包
+│       │   └── WeChatLinux_x86_64.deb  # Linux 微信客户端安装包
 │       ├── api_server.py               # FastAPI API服务器
 │       ├── producer_service/           # 生产者服务核心
 │       │   ├── __init__.py
@@ -437,18 +440,159 @@ Monitor Agent 接收到新消息后，将调用 `workflow.invoke()` 启动LangGr
 - 配置防火墙和网络隔离
 - 启用HTTPS（生产环境）
 
-### 6.3 Web UI 访问
+### 6.3 镜像构建与推送
 
-#### 单实例
+#### 镜像构建说明
 
-- noVNC访问: http://localhost:6080
-- Web UI界面: http://localhost:8000/static/index.html
+微信沙盒提供两个 Dockerfile：
+- `Dockerfile`：生产环境基础镜像（分层设计）
+- `Dockerfile.test`：测试环境镜像（继承自生产镜像，添加 FastAPI 支持）
 
-#### 多实例
+构建依赖文件存放在 `build/` 目录中：
 
-- 实例1: http://localhost:6081 (noVNC), http://localhost:8001 (API)
-- 实例2: http://localhost:6082 (noVNC), http://localhost:8002 (API)
-- 实例3: http://localhost:6083 (noVNC), http://localhost:8003 (API)
+```
+wechat_sandbox/
+├── Dockerfile
+├── Dockerfile.test
+├── build/
+│   ├── fonts-noto-cjk_20240730+repack1-1_all.deb  # Noto CJK 字体包
+│   └── WeChatLinux_x86_64.deb  # Linux 微信客户端安装包
+```
+
+#### 构建生产环境基础镜像
+
+```bash
+cd services/wechat_sandbox
+docker build -f Dockerfile -t wechat-sandbox:latest .
+```
+
+#### 构建测试环境镜像
+
+```bash
+cd services/wechat_sandbox
+docker build -f Dockerfile.test -t wechat-sandbox-test:latest .
+```
+
+**说明**：Dockerfile.test 继承自 wechat-sandbox:latest，添加 FastAPI 支持，用于测试环境部署。
+
+#### 推送到 GitHub Container Registry (ghcr.io)
+
+**步骤 1：创建 GitHub Personal Access Token**
+
+1. 访问 GitHub 设置页面：https://github.com/settings/tokens
+2. 点击 "Generate new token" → "Generate new token (classic)"
+3. 选择权限：`write:packages`, `read:packages`, `delete:packages`
+4. 生成并复制 token（仅显示一次）
+
+**步骤 2：登录 ghcr.io**
+
+```bash
+docker login ghcr.io
+# 输入用户名：GitHub 用户名（如：lsh255）
+# 输入密码：GitHub 个人访问令牌（不是 GitHub 密码）
+```
+
+**步骤 3：标记镜像**
+
+```bash
+docker tag wechat-sandbox:latest ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+**步骤 4：推送镜像**
+
+```bash
+docker push ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+**步骤 5：验证镜像**
+
+```bash
+# 查看本地镜像
+docker images | grep wechat-sandbox
+
+# 查看 ghcr.io 上的镜像（需登录）
+curl -H "Authorization: Bearer YOUR_TOKEN" https://api.github.com/user/packages
+```
+
+#### 使用远程镜像部署
+
+**测试环境、生产单服务、生产多服务部署**
+
+在 docker-compose.yml 中使用 ghcr.io 上的远程镜像：
+
+```yaml
+services:
+  wechat-sandbox:
+    image: ghcr.io/lsh255/wechat-sandbox:latest
+    container_name: wechat-sandbox-test
+    # ... 其他配置
+```
+
+多实例部署 (docker-compose.multi.yml)：
+
+```yaml
+services:
+  wechat-sandbox-1:
+    image: ghcr.io/lsh255/wechat-sandbox:latest
+    container_name: wechat-sandbox-instance-1
+    # ... 端口映射配置
+```
+
+**优点：**
+- 所有环境使用相同的镜像，确保一致性
+- 无需在每台机器上重新构建
+- 便于版本管理和回滚
+- 减少构建时间
+
+### 6.4 Web UI 访问
+
+#### 测试环境
+
+| 端口 | 服务 |
+|------|------|
+| 8000 | FastAPI |
+| 6080 | noVNC Web 界面 |
+| 5900 | VNC 客户端 |
+| 6379 | Redis |
+
+**访问地址**：
+- noVNC Web 界面：http://localhost:6080/vnc.html（密码：wechat123）
+- VNC 客户端：localhost:5900（密码：wechat123）
+- FastAPI 文档：http://localhost:8000/docs
+- 健康检查：http://localhost:8000/health
+
+#### 生产单实例
+
+| 端口 | 服务 |
+|------|------|
+| 8000 | FastAPI |
+| 6080 | noVNC |
+| 5900 | VNC |
+| 6379 | Redis |
+
+**访问地址**：
+- noVNC：http://localhost:6080
+- VNC：localhost:5900（密码：vnc123）
+- Web UI：http://localhost:8000/static/index.html
+
+#### 生产多实例
+
+| 端口范围 | 服务 |
+|----------|------|
+| 8001-8003 | FastAPI |
+| 6081-6083 | noVNC |
+| 5901-5903 | VNC |
+| 6379 | Redis |
+
+**访问地址**：
+
+| 实例 | noVNC | VNC | FastAPI |
+|------|-------|-----|---------|
+| 1 | http://localhost:6081 | localhost:5901 | http://localhost:8001 |
+| 2 | http://localhost:6082 | localhost:5902 | http://localhost:8002 |
+| 3 | http://localhost:6083 | localhost:5903 | http://localhost:8003 |
+
+VNC 密码：vnc123
 
 ## 7. 测试说明
 

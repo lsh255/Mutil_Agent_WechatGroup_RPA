@@ -339,16 +339,21 @@ workflow.add_conditional_edges(
 
 **核心组件**:
 1. **Linux微信**: 运行在容器内的Deepin Wine微信
-2. **虚拟显示**: Xvfb 提供虚拟显示服务器
+2. **虚拟显示**: Xvfb 提供虚拟显示服务器（1920x1080 分辨率）
 3. **桌面环境**: Fluxbox 轻量级窗口管理器
 4. **生产者服务**: FastAPI服务，负责消息捕获和分发
 5. **屏幕检测**: ChangeDetector 检测屏幕变化
 6. **消息分类**: MessageTypeClassifier 识别消息类型
+7. **VNC服务**: noVNC + x11vnc 提供远程访问能力
 
 **Monitor Agent服务**:
 - 管理沙盒生命周期（启动、停止、重启）
 - 从SSE流中读取数据
 - 向Orchestrator发起HTTP请求，触发工作流
+
+**远程访问**:
+- **noVNC Web界面**: 通过浏览器访问（端口 6080），密码默认为 wechat123
+- **VNC客户端**: 支持 RealVNC、TightVNC 等客户端（端口 5900），密码默认为 wechat123
 
 **数据流**:
 ```
@@ -557,3 +562,175 @@ Monitor Node是输入适配器。未来迁移企业微信：
 - ChromaDB集群
 - 工作流检查点持久化
 - 自动故障转移
+
+## 11. 镜像构建与远程部署
+
+### 11.1 镜像构建架构
+
+微信沙盒采用分层 Docker 构建策略，构建依赖文件独立存储：
+
+```
+wechat_sandbox/
+├── Dockerfile
+├── build/
+│   ├── fonts-noto-cjk_20240730+repack1-1_all.deb  # Noto CJK 字体包
+│   └── WeChatLinux_x86_64.deb  # Linux 微信客户端安装包
+├── api_server.py
+├── producer_service/
+│   ├── queue_manager.py
+│   ├── producer1_observer.py
+│   └── producer2_content_fetcher.py
+└── static/
+    └── index.html
+```
+
+**构建分层策略**:
+1. 基础层: `jlesage/baseimage-gui:debian-11`
+2. 依赖层: 安装字体包和系统依赖
+3. 应用层: 安装微信客户端和 Python 环境
+4. 代码层: 复制应用代码和服务脚本
+
+### 11.2 GitHub Container Registry (ghcr.io) 部署
+
+#### 11.2.1 推送流程
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                         镜像推送流程                                                     │
+│                                                                                          │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐        │
+│  │ 本地构建      │───▶│ 标记镜像      │───▶│ 登录 ghcr.io │───▶│ 推送镜像      │        │
+│  │              │    │              │    │              │    │              │        │
+│  │ wechat-      │    │ ghcr.io/     │    │ GitHub Token │    │ ghcr.io/     │        │
+│  │ sandbox:     │    │ lsh255/      │    │ 认证         │    │ lsh255/      │        │
+│  │ latest       │    │ wechat-      │    │              │    │ wechat-      │        │
+│  │              │    │ sandbox:     │    │              │    │ sandbox:     │        │
+│  │              │    │ latest       │    │              │    │ latest       │        │
+│  └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 11.2.2 推送步骤
+
+**步骤 1: 创建 GitHub Personal Access Token**
+
+1. 访问: https://github.com/settings/tokens
+2. 生成新 token (classic)
+3. 选择权限: `write:packages`, `read:packages`, `delete:packages`
+4. 复制 token（仅显示一次）
+
+**步骤 2: 登录 ghcr.io**
+
+```bash
+docker login ghcr.io
+# 用户名: GitHub 用户名
+# 密码: GitHub Personal Access Token
+```
+
+**步骤 3: 标记并推送**
+
+```bash
+docker tag wechat-sandbox:latest ghcr.io/lsh255/wechat-sandbox:latest
+docker push ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+### 11.3 远程镜像部署架构
+
+#### 11.3.1 部署场景
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                         远程镜像部署场景                                                 │
+│                                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │                         ghcr.io (远程镜像仓库)                                      │  │
+│  │                                                                                  │  │
+│  │  ghcr.io/lsh255/wechat-sandbox:latest                                            │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                                  │
+│                                      │ 拉取镜像                                           │
+│                                      ▼                                                  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │                         部署环境                                                   │  │
+│  │                                                                                  │  │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │  │
+│  │  │  测试环境       │  │ 生产单服务      │  │ 生产多服务      │                  │  │
+│  │  │                 │  │                 │  │                 │                  │  │
+│  │  │ docker-compose  │  │ docker-compose  │  │ docker-compose  │                  │  │
+│  │  │ .yml            │  │ .yml            │  │ .multi.yml      │                  │  │
+│  │  │                 │  │                 │  │                 │                  │  │
+│  │  │ image: ghcr.io/ │  │ image: ghcr.io/ │  │ image: ghcr.io/ │                  │  │
+│  │  │       lsh255/   │  │       lsh255/   │  │       lsh255/   │                  │  │
+│  │  │       wechat-   │  │       wechat-   │  │       wechat-   │                  │  │
+│  │  │       sandbox:  │  │       sandbox:  │  │       sandbox:  │                  │  │
+│  │  │       latest    │  │       latest    │  │       latest    │                  │  │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 11.3.2 配置示例
+
+**docker-compose.yml (测试/生产单服务)**:
+
+```yaml
+services:
+  wechat-sandbox:
+    image: ghcr.io/lsh255/wechat-sandbox:latest
+    container_name: wechat-sandbox
+    ports:
+      - "8000:8000"
+      - "5900:5900"
+      - "6080:6080"
+    volumes:
+      - ./data/wechat_profile:/wechat/data
+    environment:
+      - VNC_PASSWORD=vnc123
+```
+
+**docker-compose.multi.yml (生产多服务)**:
+
+```yaml
+services:
+  wechat-sandbox-1:
+    image: ghcr.io/lsh255/wechat-sandbox:latest
+    container_name: wechat-sandbox-instance-1
+    ports:
+      - "8001:8000"
+      - "5901:5900"
+      - "6081:6080"
+
+  wechat-sandbox-2:
+    image: ghcr.io/lsh255/wechat-sandbox:latest
+    container_name: wechat-sandbox-instance-2
+    ports:
+      - "8002:8000"
+      - "5902:5900"
+      - "6082:6080"
+
+  wechat-sandbox-3:
+    image: ghcr.io/lsh255/wechat-sandbox:latest
+    container_name: wechat-sandbox-instance-3
+    ports:
+      - "8003:8000"
+      - "5903:5900"
+      - "6083:6080"
+```
+
+### 11.4 部署优势
+
+**一致性保证**:
+- 所有环境使用完全相同的镜像
+- 避免因本地构建差异导致的问题
+
+**效率提升**:
+- 无需在每台机器上重新构建
+- 减少构建时间和资源消耗
+
+**版本管理**:
+- 支持多版本并存 (latest, v1.0, v2.0)
+- 便于版本回滚和 A/B 测试
+
+**运维简化**:
+- 集中式镜像管理
+- 便于权限控制和访问审计

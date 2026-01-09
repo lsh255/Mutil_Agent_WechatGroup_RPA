@@ -350,6 +350,99 @@ roi: [100, 200, 500, 800]  # left, top, right, bottom
 | 2 | 8002 | 6082 | 5902 |
 | 3 | 8003 | 6083 | 5903 |
 
+## 镜像构建与推送
+
+### 镜像构建依赖文件
+
+镜像构建依赖以下文件，位于 `build/` 目录：
+
+| 文件名 | 说明 |
+|--------|------|
+| `fonts-noto-cjk_20240730+repack1-1_all.deb` | Noto CJK 字体包，支持中文显示 |
+| `WeChatLinux_x86_64.deb` | Linux 微信客户端安装包 |
+
+### 本地构建镜像
+
+```bash
+# 进入项目目录
+cd services/wechat_sandbox
+
+# 构建镜像
+docker build -t wechat_sandbox:latest .
+
+# 或者指定镜像名称
+docker build -t ghcr.io/lsh255/wechat-sandbox:latest .
+```
+
+### 推送镜像到 GitHub Container Registry (ghcr.io)
+
+#### 1. 准备工作
+
+创建 GitHub 个人访问令牌（Personal Access Token）：
+1. 访问：https://github.com/settings/tokens
+2. 点击"Generate new token" → "Generate new token (classic)"
+3. 设置 Token 名称（如：ghcr-push）
+4. 勾选权限：
+   - ✅ `write:packages`（推送镜像）
+   - ✅ `read:packages`（拉取镜像）
+   - ✅ `delete:packages`（可选，删除镜像）
+5. 点击生成并复制令牌
+
+#### 2. 登录 ghcr.io
+
+```bash
+docker login ghcr.io
+# 输入用户名：GitHub 用户名（如：lsh255）
+# 输入密码：GitHub 个人访问令牌（不是 GitHub 密码）
+```
+
+#### 3. 打标签
+
+```bash
+# 本地镜像打标签
+docker tag wechat_sandbox:latest ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+#### 4. 推送镜像
+
+```bash
+docker push ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+#### 5. 验证推送
+
+```bash
+# 查看远程镜像信息
+docker pull ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+### 使用远程镜像部署
+
+测试环境、生产单服务、生产多服务均可依赖 ghcr.io 上的远程镜像启动容器：
+
+**docker-compose.yml** 示例：
+
+```yaml
+version: '3.8'
+
+services:
+  wechat_sandbox:
+    image: ghcr.io/lsh255/wechat-sandbox:latest
+    container_name: wechat_sandbox
+    ports:
+      - "6080:6080"  # noVNC
+      - "5900:5900"  # VNC
+      - "8000:8000"  # FastAPI
+      - "6379:6379"  # Redis
+    restart: unless-stopped
+```
+
+**启动命令**：
+
+```bash
+docker-compose up -d
+```
+
 ## 部署方式
 
 ### 1. 开发环境（单实例）
@@ -364,15 +457,72 @@ docker-compose -f docker-compose.test.yml up -d --build
 
 ### 2. 生产环境（单实例）
 
+使用远程镜像（推荐）：
+```bash
+docker-compose -f docker-compose.yml up -d
+```
+
+或本地构建：
 ```bash
 docker-compose -f docker-compose.yml up -d --build
 ```
 
 ### 3. 生产环境（多实例）
 
+使用远程镜像（推荐）：
+```bash
+docker-compose -f docker-compose.multi.yml up -d
+```
+
+或本地构建：
 ```bash
 docker-compose -f docker-compose.multi.yml up -d --build
 ```
+
+## 目录结构
+
+```
+wechat_sandbox/
+├── Dockerfile                 # 镜像构建文件
+├── Dockerfile.test            # 测试环境镜像构建文件
+├── docker-compose.yml         # 生产环境单实例配置
+├── docker-compose.test.yml    # 开发/测试环境配置
+├── docker-compose.multi.yml   # 生产环境多实例配置
+├── config.yaml                # 配置文件
+├── CONTEXT.md                 # 技术上下文文档
+├── build/                     # 镜像构建依赖文件
+│   ├── fonts-noto-cjk_20240730+repack1-1_all.deb
+│   └── WeChatLinux_x86_64.deb
+├── producer_service/           # 核心服务代码
+│   ├── __init__.py
+│   ├── api_server.py          # FastAPI 服务器
+│   ├── monitor.py             # 视觉监控器
+│   ├── detector.py            # 变化检测器
+│   ├── classifier.py          # 消息分类器
+│   ├── extractor.py           # 精确内容提取器
+│   ├── producer1_observer.py # 生产者1
+│   ├── producer2_content_fetcher.py # 生产者2
+│   ├── queue_manager.py       # 队列管理器
+│   └── main.py                # 主入口
+├── static/                    # 静态资源
+│   └── index.html             # Web UI 管理界面
+└── data/                      # 数据存储目录
+    ├── images/                # 媒体图片存储
+    └── logs/                  # 日志文件存储
+```
+
+### build/ 目录说明
+
+`build/` 目录用于存放 Docker 镜像构建所需的依赖文件，这些文件会在镜像构建过程中被复制到容器内并安装：
+
+**文件列表**：
+- `fonts-noto-cjk_20240730+repack1-1_all.deb`：Noto CJK 字体包，确保微信中文显示正常
+- `WeChatLinux_x86_64.deb`：Linux 版微信客户端安装包
+
+**注意事项**：
+- 这些文件较大（总大小约 300MB），镜像构建完成后可以删除，因为已打包到镜像中
+- 如需重新构建镜像，需要保留这些文件
+- 推荐使用 ghcr.io 上的远程镜像，避免重复本地构建
 
 ## 开发规范
 

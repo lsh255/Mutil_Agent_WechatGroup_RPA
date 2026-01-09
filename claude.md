@@ -122,7 +122,7 @@
 │         Docker Container                │
 │  ┌──────────────────────────────────┐  │
 │  │   Linux WeChat Client           │  │
-│  │   (Headless, running in Xvfb)   │  │
+│  │   (Headless, Xvfb 1920x1080)    │  │
 │  └────────────┬─────────────────────┘  │
 │               │ Screen Capture          │
 │  ┌────────────▼─────────────────────┐  │
@@ -155,8 +155,11 @@
 └───────────────┼────────────────────────┘
                 │
         ┌───────▼───────┐
-        │  noVNC UI     │
-        │  (Port 6080)  │
+        │  VNC Service  │
+        │ - noVNC Web   │
+        │   (Port 6080) │
+        │ - x11vnc Prot │
+        │   (Port 5900) │
         └───────────────┘
 ```
 
@@ -378,6 +381,22 @@ python run_tests.py integration
 pytest tests/ --cov=. --cov-report=html
 ```
 
+#### 3.1 Test Image Build
+
+**Dockerfile.test** provides a lightweight test environment image for rapid development and testing.
+
+**Build Test Image**:
+```bash
+cd services/wechat_sandbox
+docker build -f Dockerfile.test -t wechat-sandbox-test:latest .
+```
+
+**Test Image Features**:
+- Based on Python 3.12 base image, does not include full WeChat environment
+- Only includes necessary dependencies (OpenCV, FastAPI, Redis, etc.)
+- Suitable for unit tests and API tests
+- Fast build speed, low resource usage
+
 ### 4. MonitorAgent
 
 **Path**: `agents/monitor_agent.py`
@@ -402,6 +421,37 @@ class MonitorAgent:
 - `5800` → noVNC Web interface
 - `5900` → VNC protocol
 - `6789` → Producer service API
+
+#### 4.1 Environment Port Configuration
+
+Different environments use different port configurations:
+
+**Test Environment (Local Development)**:
+| Port | Service |
+|------|---------|
+| 8000 | FastAPI |
+| 6080 | noVNC Web interface |
+| 5900 | VNC Client |
+| 6379 | Redis |
+
+**Production Environment (Single Instance)**:
+| Port | Service |
+|------|---------|
+| 8000 | FastAPI |
+| 6080 | noVNC Web interface |
+| 5900 | VNC Client |
+| 6379 | Redis |
+
+**Production Environment (Multi-Instance)**:
+| Instance | FastAPI | noVNC Web | VNC Client |
+|----------|---------|-----------|-----------|
+| 1 | 8001 | 6081 | 5901 |
+| 2 | 8002 | 6082 | 5902 |
+| 3 | 8003 | 6083 | 5903 |
+
+**VNC Remote Access**:
+- **noVNC Web Interface**: Access via browser (ports 6080/6081/6082/6083), default password: `wechat123`
+- **VNC Client**: Supports RealVNC, TightVNC, etc. (ports 5900/5901/5902/5903), default password: `wechat123`
 
 ### 5. Orchestrator
 
