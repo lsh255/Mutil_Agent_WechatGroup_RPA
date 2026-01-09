@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  wechat_sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.wechat
+    container_name: wechat_sandbox
+    ports:
+      - "6080:6080"
+      - "5900:5900"
+    environment:
+      - DISPLAY=:99
+    volumes:
+      - ./media:/app/media
+      - ./logs:/app/logs
+      - wechat_data:/root/.wechat
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+volumes:
+  wechat_data:

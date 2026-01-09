@@ -1,29 +1,47 @@
-FROM jlesage/baseimage-gui:debian-11
+FROM python:3.12-slim
 
-# 安装必要的依赖
-RUN apt-get update && apt-get install -y \
-    wget \
-    curl \
-    python3 \
-    python3-pip \
-    xvfb \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装Python依赖
-COPY requirements.txt /tmp/
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
-
-# 复制生产者服务
-COPY producer_service/ /app/producer_service/
-
-# 设置工作目录
 WORKDIR /app
 
-# 暴露端口
-EXPOSE 5800 5900 6789
+RUN apt-get update && apt-get install -y \
+    x11-apps \
+    xvfb \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgthread-2.0-0 \
+    libgtk-3-0 \
+    libnotify4 \
+    libnss3 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils \
+    libatspi2.0-0 \
+    libappindicator3-1 \
+    libsecret-1-0 \
+    libgbm1 \
+    wget \
+    tigervnc-standalone-server \
+    tigervnc-common \
+    tigervnc-tools \
+    novnc \
+    websockify \
+    x11vnc \
+    fluxbox \
+    && rm -rf /var/lib/apt/lists/*
 
-# 启动脚本
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
+COPY requirements.txt .
 
-CMD ["/start.sh"]
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN mkdir -p /root/.vnc && \
+    chmod 700 /root/.vnc
+
+ENV PYTHONUNBUFFERED=1
+ENV DISPLAY=:99
+
+CMD ["bash", "start.sh"]

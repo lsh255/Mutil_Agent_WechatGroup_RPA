@@ -60,3 +60,7 @@ htmlcov/
 *.bak
 *.swp
 .DS_Store
+
+# 微信安装包
+services/wechat_sandbox/WeChatLinux_x86_64.deb
+*.deb

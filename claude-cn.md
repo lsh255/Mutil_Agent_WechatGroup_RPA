@@ -10,15 +10,16 @@
 - **Ollama**: 本地 AI 模型服务（Qwen3-VL 视觉模型、Qwen3-Embedding 嵌入模型）
 - **FastAPI**: REST API 编排层
 - **ChromaDB**: 向量数据库（知识库）
-- **Redis**: 状态存储和缓存
-- **Docker**: 容器化的微信沙盒环境
+- **Redis**: 状态存储和消息队列
+- **Docker**: 容器化的微信沙盒环境（支持多实例部署）
+- **VNC/noVNC**: 浏览器远程访问 Docker 化微信界面
 
 ## 架构模式
 
 系统采用 **"中心化工作流 + 外围服务"** 的混合架构：
 
 ```
-微信沙盒 (Docker) → 监控智能体 → 编排器 (FastAPI) → LangGraph 工作流
+微信沙盒 (Docker 多实例) → 监控智能体 → 编排器 (FastAPI) → LangGraph 工作流
                                                       ↓
                                               [多模态分析 → 状态跟踪 → 文档生成]
                                                       ↓
@@ -29,13 +30,15 @@
 
 1. **监控智能体 MonitorAgent** (`agents/monitor_agent.py`)
    - 管理微信 Docker 容器生命周期
-   - 通过 Server-Sent Events 消费消息流
+   - 通过 Server-Sent Events (SSE) 消费消息流
    - 触发工作流执行
+   - 支持多实例消息聚合
 
 2. **编排器 Orchestrator** (`services/orchestrator/main.py`)
    - 运行在 8000 端口的 FastAPI 服务
    - 管理和执行 LangGraph 工作流
    - 处理状态和结果返回
+   - 提供 RESTful API 端点
 
 3. **LangGraph 工作流** (`core/workflows/`)
    - **监控节点 Monitor Node**: 消息验证和路由
@@ -43,12 +46,26 @@
    - **状态跟踪节点 StateTracker Node**: 任务状态管理
    - **文档节点 Document Node**: Excel/Word 文档生成
 
+4. **微信沙盒服务** (`services/wechat_sandbox/`)
+   - **生产者服务 Producer1Observer**: 监控微信群消息
+   - **内容抓取 Producer2ContentFetcher**: 抓取消息内容
+   - **消息队列 RedisQueueManager**: 消息持久化和分发
+   - **屏幕检测 ChangeDetector**: 检测屏幕变化
+   - **消息分类 MessageTypeClassifier**: 识别消息类型
+
+5. **Web UI 界面** (`services/wechat_sandbox/static/`)
+   - **VNC 集成**: 通过 noVNC 浏览器访问微信界面
+   - **ROI 配置面板**: 可视化配置监控区域
+   - **状态监控**: 实时显示服务状态
+   - **消息流显示**: 实时展示捕获的消息
+
 ## 重要文件位置
 
 ### 配置文件
 - `config/settings.yaml` - 主配置文件
 - `.env` - 环境变量配置（不在 git 中）
-- `docker-compose.yml` - 服务编排配置
+- `docker-compose.yml` - 单实例服务编排配置
+- `docker-compose.multi.yml` - 多实例服务编排配置（生产环境）
 
 ### 核心框架
 - `core/schemas.py` - 数据模型定义（RawMessage、MessageType 等）
@@ -59,6 +76,18 @@
 ### 工具层
 - `tools/excel_tool.py` - Excel 更新操作
 - `tools/word_tool.py` - Word 报告生成
+
+### 微信沙盒服务
+- `services/wechat_sandbox/producer_service/` - 生产者服务核心
+  - `__init__.py` - 服务导出模块
+  - `queue_manager.py` - Redis 队列管理器
+  - `producer1_observer.py` - 消息观察者
+  - `producer2_content_fetcher.py` - 内容抓取者
+- `services/wechat_sandbox/utils/` - 工具模块
+  - `classifier.py` - 消息类型分类器
+  - `detector.py` - 屏幕变化检测器
+- `services/wechat_sandbox/api_server.py` - FastAPI API 服务器
+- `services/wechat_sandbox/static/index.html` - Web UI 界面
 
 ### 知识库
 - `knowledge_base/vector_store.py` - ChromaDB 封装
@@ -175,6 +204,58 @@ tool.generate_from_template(
 )
 ```
 
+### API 服务器生命周期管理
+
+`api_server.py` 使用 FastAPI 的 `lifespan` 机制管理服务启动和关闭：
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global queue_manager, producer1, producer2
+    try:
+        logger.info("Starting Producer Service...")
+        queue_manager = RedisQueueManager()
+        producer1 = Producer1Observer(queue_manager)
+        producer2 = Producer2ContentFetcher(queue_manager)
+        producer1.start()
+        producer2.start()
+        logger.info("Producer Service started successfully")
+        yield
+    except Exception as e:
+        logger.error(f"Failed to start Producer Service: {e}")
+        raise
+    finally:
+        logger.info("Shutting down Producer Service...")
+        if producer1:
+            producer1.stop()
+        if producer2:
+            producer2.stop()
+        logger.info("Producer Service stopped")
+```
+
+### LangGraph 条件路由
+
+使用条件边实现动态路由：
+
+```python
+def should_generate_document(state: AgentState) -> str:
+    """判断是否应该生成文档"""
+    analysis = state.get("multimodal_analysis", {})
+    if any(signal in analysis.get("text", "") for signal in ["complete", "end", "report"]):
+        return "yes"
+    return "no"
+
+# 在工作流中添加条件边
+workflow.add_conditional_edges(
+    "multimodal",
+    should_generate_document,
+    {
+        "yes": "document_node",
+        "no": END
+    }
+)
+```
+
 ## 常见开发任务
 
 ### 添加新的消息类型
@@ -253,6 +334,23 @@ results = vector_store.similarity_search(
 )
 ```
 
+### 配置 ROI 监控区域
+
+通过 Web UI 界面配置 ROI 区域：
+
+1. 访问 `http://localhost:6080`（noVNC）或 `http://localhost:8000/static/index.html`（Web UI）
+2. 点击"配置 ROI"按钮
+3. 在预览图像上拖拽选择监控区域
+4. 保存配置，配置会应用到 Producer1Observer 的监控逻辑
+
+### 通过热键操作 ROI
+
+在 Docker 微信环境中使用热键快速配置 ROI：
+
+- `Ctrl+Shift+R`: 进入 ROI 配置模式
+- `Ctrl+Shift+S`: 保存当前 ROI 配置
+- `Ctrl+Shift+C`: 取消 ROI 配置
+
 ## 代码风格规范
 
 1. **类型提示**: 所有函数必须有类型提示
@@ -295,14 +393,52 @@ pytest
 
 # 生成覆盖率报告
 pytest --cov=core --cov-report=html
+
+# 生成 HTML 测试报告（使用 pytest-html）
+pytest --html=report.html --self-contained-html
 ```
+
+### 测试框架说明
+
+- **pytest**: 主要测试框架
+- **pytest-html**: 生成 HTML 测试报告
+- **numpy**: 用于视觉测试（创建测试图像）
+- **pytest-asyncio**: 异步测试支持
+
+### 测试修复记录
+
+**test_producer_service.py 修复：**
+1. 修复了 ChangeDetector 测试方法中错误的阈值检查（50 → 0.05）
+2. 修复了 detect_changes 返回值检查（从 len() 改为直接检查布尔值）
+3. 修复了 MessageTypeClassifier 测试方法中错误的输入类型（字符串 → numpy 图像）
+4. 修复了 MessageTypeClassifier 返回值断言（从字典 → 字符串）
+5. 添加了 pytest-html 依赖支持
 
 ## Docker 服务
 
-### 微信沙盒
-- **端口**: 5800 (noVNC), 5900 (VNC), 6789 (生产者服务)
-- **使用**: 通过浏览器访问 http://localhost:5800 操作微信
+### 微信沙盒（单实例）
+- **端口**: 6080 (noVNC), 5900 (VNC), 8000 (生产者服务)
+- **使用**: 通过浏览器访问 http://localhost:6080 操作微信
 - **管理**: `docker start/stop wechat-sandbox`
+
+### 微信沙盒（多实例）
+- **端口映射**:
+  - 实例 1: 8001 (API), 6081 (noVNC), 5901 (VNC)
+  - 实例 2: 8002 (API), 6082 (noVNC), 5902 (VNC)
+  - 实例 3: 8003 (API), 6083 (noVNC), 5903 (VNC)
+- **使用**: 通过不同的 noVNC 端口访问不同的微信实例
+- **管理**: 使用 `docker-compose.multi.yml` 配置文件
+
+**多实例部署命令：**
+```bash
+# 启动多实例
+docker-compose -f docker-compose.multi.yml up -d
+
+# 访问不同实例
+# 实例 1: http://localhost:6081
+# 实例 2: http://localhost:6082
+# 实例 3: http://localhost:6083
+```
 
 ### Ollama
 - **端口**: 11434
@@ -311,7 +447,45 @@ pytest --cov=core --cov-report=html
 
 ### Redis
 - **端口**: 6379
-- **用途**: 缓存和分布式锁
+- **用途**: 消息队列和状态缓存
+
+## Web UI 界面
+
+### 访问方式
+
+1. **noVNC 浏览器访问**: http://localhost:6080（单实例）或 http://localhost:6081-6083（多实例）
+2. **Web UI 界面**: http://localhost:8000/static/index.html
+
+### 功能模块
+
+1. **VNC 集成**
+   - 通过 noVNC 在浏览器中远程访问 Docker 中的微信界面
+   - 支持完整的微信操作（扫码登录、发送消息等）
+   - 实时屏幕同步
+
+2. **ROI 配置面板**
+   - 可视化配置监控区域
+   - 拖拽选择 ROI 区域
+   - 保存和管理多个 ROI 配置
+
+3. **状态监控**
+   - 实时显示生产者服务状态
+   - 消息队列长度监控
+   - 屏幕检测状态
+
+4. **消息流显示**
+   - 实时展示捕获的消息
+   - 消息类型和内容预览
+   - 消息时间戳和发送者信息
+
+### API 端点
+
+- `GET /health`: 健康检查
+- `GET /status`: 服务状态
+- `GET /messages`: 消息流（SSE）
+- `POST /roi`: 更新 ROI 配置
+- `POST /start`: 启动生产者服务
+- `POST /stop`: 停止生产者服务
 
 ## 性能优化建议
 
@@ -319,6 +493,7 @@ pytest --cov=core --cov-report=html
 2. **异步操作**: 使用 `asyncio` 提高并发消息处理能力
 3. **Redis 缓存**: 缓存常用查询（嵌入向量、RAG 结果）
 4. **批量处理**: 将多个消息分组进行批量分析
+5. **多实例部署**: 使用多实例 Docker 部署支持多用户/多群组场景
 
 ## 安全注意事项
 
@@ -326,6 +501,7 @@ pytest --cov=core --cov-report=html
 2. **API 密钥**: 所有密钥使用环境变量
 3. **输入验证**: 在所有节点中验证用户输入
 4. **Docker 隔离**: 使用 Docker 网络隔离服务
+5. **VNC 密码**: 生产环境必须设置强密码
 
 ## 故障排查
 
@@ -357,6 +533,27 @@ docker exec -it ollama ollama list
 docker exec -it ollama ollama pull qwen3-vl-8b
 ```
 
+**VNC 连接失败：**
+```bash
+# 检查 VNC 服务状态
+docker exec -it wechat-sandbox ps aux | grep vnc
+
+# 重启 VNC 服务
+docker restart wechat-sandbox
+```
+
+**Redis 连接失败：**
+```bash
+# 检查 Redis 容器状态
+docker ps | grep redis
+
+# 检查 Redis 日志
+docker logs redis
+
+# 测试连接
+redis-cli -h localhost ping
+```
+
 ## 主要依赖包
 
 - `langgraph>=0.0.50` - 工作流编排
@@ -366,10 +563,13 @@ docker exec -it ollama ollama pull qwen3-vl-8b
 - `pydantic-settings` - 配置管理
 - `structlog` - 结构化日志
 - `docker` - 容器管理
-- `redis` - 缓存
+- `redis` - 消息队列
 - `chromadb` - 向量数据库
 - `openpyxl` - Excel 操作
 - `python-docx` - Word 操作
+- `pytest` - 测试框架
+- `pytest-html` - HTML 测试报告
+- `numpy` - 数值计算（用于视觉测试）
 
 ## 参考资源
 
@@ -381,9 +581,18 @@ docker exec -it ollama ollama pull qwen3-vl-8b
 
 ## 快速参考
 
-### 启动所有服务：
+### 启动所有服务（单实例）：
 ```bash
 docker-compose up -d
+docker exec -it ollama ollama pull qwen3-vl-8b
+docker exec -it ollama ollama pull qwen3-embedding-4b
+python scripts/init_knowledge_base.py
+uvicorn services.orchestrator.main:app --reload
+```
+
+### 启动所有服务（多实例）：
+```bash
+docker-compose -f docker-compose.multi.yml up -d
 docker exec -it ollama ollama pull qwen3-vl-8b
 docker exec -it ollama ollama pull qwen3-embedding-4b
 python scripts/init_knowledge_base.py
@@ -411,6 +620,19 @@ curl -X POST http://localhost:8000/workflow/trigger \
 curl http://localhost:8000/workflow/status
 ```
 
+### 访问微信界面：
+```bash
+# 单实例
+http://localhost:6080
+
+# 多实例实例 1
+http://localhost:6081
+# 多实例实例 2
+http://localhost:6082
+# 多实例实例 3
+http://localhost:6083
+```
+
 ## 给 Claude 的提示
 
 在使用此代码库时：
@@ -421,6 +643,8 @@ curl http://localhost:8000/workflow/status
 4. **检查配置** - 许多行为在 `settings.yaml` 或 `.env` 中配置
 5. **监控日志** - 使用 structlog 输出调试问题
 6. **遵循异步模式** - 大多数 I/O 操作都是异步的
+7. **注意多实例配置** - 生产环境需要使用 `docker-compose.multi.yml`
+8. **理解 ROI 配置** - 监控区域配置影响消息捕获的准确性
 
 项目在某些文件中**使用中文注释**，并支持中文文本处理（微信消息）。使用的 AI 模型（Qwen3）是针对中文优化的模型。
 
@@ -430,16 +654,19 @@ curl http://localhost:8000/workflow/status
 2. **有状态工作流**: 使用 LangGraph 维护对话和任务状态
 3. **本地 AI**: 使用 Ollama 本地部署，无需外部 API 调用
 4. **容器化隔离**: 微信运行在独立的 Docker 容器中
-5. **RAG 增强**: 结合向量数据库提供上下文感知
-6. **中文优化**: 针对中文场景的模型和配置
+5. **多实例部署**: 支持生产级别的多用户/多群组场景
+6. **浏览器访问**: 通过 noVNC 在浏览器中远程操作微信
+7. **RAG 增强**: 结合向量数据库提供上下文感知
+8. **中文优化**: 针对中文场景的模型和配置
+9. **Web UI 界面**: 提供可视化的配置和监控界面
 
 ### 典型工作流程
 
-1. 微信沙盒容器捕获群消息
-2. 生产者服务通过 SSE 推送消息
+1. 微信沙盒容器（单实例或多实例）捕获群消息
+2. 生产者服务通过 SSE 推送消息到 API 服务器
 3. MonitorAgent 接收消息并触发工作流
 4. LangGraph 工作流依次执行各节点：
-   - 多模态节点分析消息内容
+   - 多模态节点分析消息内容（文本+图片）
    - 状态跟踪节点判断任务进度
    - 如果任务完成，文档节点生成报告
 5. 更新 Excel 台账和生成 Word 报告
@@ -447,25 +674,31 @@ curl http://localhost:8000/workflow/status
 ### 关键设计模式
 
 - **状态机模式**: LangGraph 管理工作流状态转换
-- **生产者-消费者模式**: 消息队列解耦组件
+- **生产者-消费者模式**: Redis 消息队列解耦组件
 - **策略模式**: 不同消息类型使用不同的处理策略
 - **模板方法模式**: 文档生成使用 Jinja2 模板
 - **单例模式**: 配置和连接池使用单例
+- **观察者模式**: Producer1Observer 监控屏幕变化
+- **工厂模式**: 根据消息类型创建不同的处理器
 
 ### 性能指标
 
 - 消息处理延迟: < 3秒（不含文档生成）
 - 并发处理能力: 支持多个工作流并行执行
+- 多实例支持: 默认支持 3 个独立微信实例
 - 内存占用: Ollama 模型加载约需 8-16GB RAM
 - 存储需求: ChromaDB 向量存储约 100-500MB（取决于知识库大小）
+- 屏幕检测延迟: < 500ms（ChangeDetector）
 
 ### 扩展方向
 
 可以考虑添加的功能：
 - 支持语音消息转文字（Whisper）
 - 支持视频帧提取和分析
-- 增加多群组管理
-- 添加 Web UI 管理界面
+- 增强多群组管理（支持更多实例）
+- 完善 Web UI 管理界面（用户认证、权限管理）
 - 支持定时任务和提醒
 - 集成企业微信 API
 - 添加数据分析和可视化
+- 支持 OCR 文字识别
+- 增强消息搜索和过滤功能

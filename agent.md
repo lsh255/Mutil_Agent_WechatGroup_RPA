@@ -13,6 +13,8 @@
 - 多模态理解（文本+图像）能力
 - 智能任务状态跟踪和管理
 - 自动化文档生成（Excel、Word）
+- 生产级多实例部署支持
+- 浏览器远程访问和配置管理
 
 ## 🏗️ 系统架构
 
@@ -21,11 +23,19 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     微信沙盒容器 (Docker)                      │
-│  ├── WeChat 客户端实例                                         │
-│  ├── 生产者服务 (http://localhost:6789)                       │
-│  └── noVNC 远程桌面 (http://localhost:5800)                   │
+│  ├── Linux 微信客户端                                         │
+│  ├── 生产者服务 (http://localhost:8000)                       │
+│  │   ├── FastAPI 服务器 (api_server.py)                      │
+│  │   │   └── @asynccontextmanager lifespan                    │
+│  │   ├── Producer1 (观察器 - 屏幕监控)                         │
+│  │   ├── Producer2 (内容获取器 - 消息提取)                     │
+│  │   ├── ChangeDetector (变化检测器)                           │
+│  │   ├── MessageTypeClassifier (消息分类器)                   │
+│  │   └── RedisQueueManager (队列管理器)                        │
+│  ├── noVNC 远程桌面 (http://localhost:6080)                   │
+│  └── Web UI 管理界面 (http://localhost:8000/api/ui)            │
 └──────────────────────┬──────────────────────────────────────┘
-                       │ SSE 消息流
+                       │ SSE 消息流 / HTTP API
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                  MonitorAgent (监控智能体)                     │
@@ -65,11 +75,12 @@
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   外部服务与基础设施                           │
-│  ├── Redis (状态缓存、分布式锁)                                │
-│  ├── Ollama (AI 模型服务)                                     │
+│  ├── Redis (状态缓存、分布式锁、消息队列)                       │
+│  ├── Ollama (本地 AI 模型服务)                                │
 │  │   ├── Qwen3-VL (视觉理解)                                  │
-│  │   ├── Qwen3-Embedding (文本嵌入)                           │
 │  │   └── Qwen3-Chat (对话生成)                                │
+│  ├── SiliconFlow (云 AI 模型服务)                             │
+│  │   └── Qwen3-Embedding (文本嵌入)                           │
 │  ├── ChromaDB (向量数据库)                                    │
 │  └── 文档工具 (Word/Excel 生成)                               │
 └─────────────────────────────────────────────────────────────┘
@@ -83,10 +94,14 @@
 | LangGraph | 0.0.50+ | 工作流编排框架 |
 | LangChain | 0.1.0+ | AI 工具集成框架 |
 | FastAPI | 0.104+ | Web API 框架 |
+| OpenCV | 4.8+ | 图像处理和计算机视觉 |
 | Ollama | latest | 本地 AI 模型服务 |
+| SiliconFlow | - | 云 AI 模型服务（Embedding） |
 | ChromaDB | latest | 向量数据库 |
-| Redis | 7.0+ | 缓存和状态存储 |
+| Redis | 7.0+ | 缓存、状态存储、消息队列 |
 | Docker | 20.0+ | 容器化部署 |
+| noVNC | latest | Web 远程桌面 |
+| Xvfb & Fluxbox | - | 虚拟显示和窗口管理器 |
 
 ### AI 模型配置
 
@@ -95,13 +110,380 @@ ai:
   ollama:
     base_url: "http://localhost:11434"
     vision_model: "qwen3-vl-8b:latest"       # 图像理解
-    embedding_model: "qwen3-embedding-4b"    # 文本嵌入
     chat_model: "qwen3-72b:latest"           # 对话生成
+  siliconflow:
+    api_key: "your-api-key"
+    base_url: "https://api.siliconflow.cn/v1"
+    embedding_model: "Qwen/Qwen3-Embedding-8B"  # 文本嵌入
 ```
 
 ## 🔧 核心组件详解
 
-### 1. MonitorAgent（监控智能体）
+### 1. 微信沙盒容器（WeChat Sandbox）
+
+**文件路径**：`services/wechat_sandbox/`
+
+**核心职责**：
+- 提供隔离的 Linux 微信运行环境
+- 通过 noVNC 提供浏览器访问界面
+- 实现屏幕监控和消息捕获
+- 提供生产者服务 API 接口
+- 支持 Web UI 管理界面
+- 支持多实例部署
+
+**技术架构**：
+
+```
+┌─────────────────────────────────────────┐
+│         Docker 容器                      │
+│  ┌──────────────────────────────────┐  │
+│  │   Linux 微信客户端                │  │
+│  │   (无头模式，运行在 Xvfb)        │  │
+│  └────────────┬─────────────────────┘  │
+│               │ 屏幕截图                  │
+│  ┌────────────▼─────────────────────┐  │
+│  │   Producer1 (观察器)             │  │
+│  │   - ChangeDetector (变化检测)    │  │
+│  │   - MessageTypeClassifier       │  │
+│  │   - ROI 监控区域管理              │  │
+│  └────────────┬─────────────────────┘  │
+│               │ 检测到新消息             │
+│  ┌────────────▼─────────────────────┐  │
+│  │   Producer2 (内容获取器)         │  │
+│  │   - 消息气泡提取                  │  │
+│  │   - 文本/图像解析                │  │
+│  │   - OCR 文字识别                  │  │
+│  └────────────┬─────────────────────┘  │
+│               │ 结构化消息              │
+│  ┌────────────▼─────────────────────┐  │
+│  │   RedisQueueManager              │  │
+│  │   - Redis Streams                │  │
+│  │   - 消息持久化                    │  │
+│  │   - 多消费者支持                  │  │
+│  └────────────┬─────────────────────┘  │
+│               │ SSE / HTTP             │
+│  ┌────────────▼─────────────────────┐  │
+│  │   FastAPI 服务器                  │  │
+│  │   - REST API 端点                │  │
+│  │   - SSE 消息流                   │  │
+│  │   - Web UI 服务                  │  │
+│  └────────────┬─────────────────────┘  │
+└───────────────┼────────────────────────┘
+                │
+        ┌───────▼───────┐
+        │  noVNC 界面   │
+        │  (端口 6080)  │
+        └───────────────┘
+```
+
+**关键模块**：
+
+#### 1.1 生产者服务（Producer Service）
+
+**文件**：`producer_service/api_server.py`
+
+**核心功能**：
+- FastAPI 服务器，提供 REST API 和 SSE 接口
+- 管理生产者服务生命周期（lifespan 管理）
+- 提供健康检查和状态查询
+- 集成 Web UI 管理界面
+
+**生命周期管理**：
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global queue_manager, producer1, producer2
+    try:
+        logger.info("Starting Producer Service...")
+        queue_manager = RedisQueueManager()
+        producer1 = Producer1Observer(queue_manager)
+        producer2 = Producer2ContentFetcher(queue_manager)
+        producer1.start()
+        producer2.start()
+        logger.info("Producer Service started successfully")
+        yield
+    except Exception as e:
+        logger.error(f"Failed to start Producer Service: {e}")
+        raise
+    finally:
+        logger.info("Shutting down Producer Service...")
+        if producer1:
+            producer1.stop()
+        if producer2:
+            producer2.stop()
+        logger.info("Producer Service stopped")
+```
+
+**API 端点**：
+
+| 端点 | 方法 | 功能 | 说明 |
+|------|------|------|------|
+| `/` | GET | 服务信息 | 返回版本和状态 |
+| `/health` | GET | 健康检查 | 检查服务健康状态 |
+| `/status` | GET | 获取状态 | 获取详细服务状态 |
+| `/api/screenshot` | GET | 屏幕截图 | 获取当前屏幕截图 |
+| `/api/roi` | POST | 更新ROI | 更新监控区域配置 |
+| `/stream` | GET | 消息流 | SSE 实时消息流 |
+| `/api/ui` | GET | Web UI | 管理界面 |
+
+#### 1.2 观察器（Producer1 Observer）
+
+**文件**：`producer_service/producer1_observer.py`
+
+**核心功能**：
+- 持续监控屏幕变化
+- 使用 ROI（感兴趣区域）提高效率
+- 检测新消息气泡
+- 调用内容获取器处理
+
+**工作流程**：
+```
+1. 初始化 Xvfb 虚拟显示
+2. 配置 ROI 监控区域
+3. 循环执行：
+   - 捕获屏幕截图
+   - 使用 ChangeDetector 检测变化
+   - 检测到变化 → 调用 Producer2
+   - 使用 MessageTypeClassifier 分类
+   - 将消息推送到 Redis
+```
+
+#### 1.3 内容获取器（Producer2 Content Fetcher）
+
+**文件**：`producer_service/producer2_content_fetcher.py`
+
+**核心功能**：
+- 提取消息气泡边界
+- 解析消息内容（文本、图像）
+- OCR 文字识别（如需要）
+- 生成结构化消息
+
+**消息结构**：
+```python
+{
+    "sender": "发送者",
+    "content": "消息内容",
+    "message_type": "text",  # text/image/video/link
+    "timestamp": "2026-01-09T10:30:00",
+    "metadata": {
+        "bubble_bbox": [x, y, w, h],
+        "has_avatar": True,
+        "group_id": "group_123"
+    }
+}
+```
+
+#### 1.4 变化检测器（ChangeDetector）
+
+**文件**：`producer_service/detector.py`
+
+**核心功能**：
+- 使用 dHash 算法检测帧间差异
+- HSV 颜色空间识别消息气泡
+- 轮廓检测和验证
+- 阈值和形态学操作
+
+**关键方法**：
+```python
+class ChangeDetector:
+    def compute_dhash(image):        # 计算图像哈希
+    def hash_distance(hash1, hash2): # 计算汉明距离
+    def detect_changes(current, prev): # 检测显著变化
+    def detect_bubbles(image):      # 识别消息气泡
+```
+
+**配置参数**：
+- `threshold`: 0.05（变化阈值）
+- `hash_diff_threshold`: 2（哈希距离阈值）
+- `hsv_lower/upper`: HSV 颜色范围（绿色气泡）
+- `min_area`: 500（最小气泡面积）
+
+#### 1.5 消息类型分类器（MessageTypeClassifier）
+
+**文件**：`producer_service/classifier.py`
+
+**核心功能**：
+- 基于图像特征分类消息类型
+- HSV 颜色空间检测图标
+- 支持的类型：text、image、video、link、unknown
+
+**分类逻辑**：
+```
+1. 检测黄色/蓝色图标 → 媒体消息
+2. 进一步区分图片 vs 视频
+3. 检测蓝色链接图标 → 链接消息
+4. 检查宽高比 → 辅助判断
+5. 默认 → 文本消息
+```
+
+#### 1.6 Redis 队列管理器（RedisQueueManager）
+
+**文件**：`producer_service/queue_manager.py`
+
+**核心功能**：
+- 使用 Redis Streams 实现消息队列
+- 支持多消费者并发读取
+- 消息持久化和容错
+- 提供队列状态查询
+
+**数据结构**：
+```
+Stream: wechat_messages
+Fields: sender, content, message_type, timestamp, metadata
+```
+
+#### 1.7 Web UI 管理界面
+
+**文件**：`static/index.html`
+
+**核心功能**：
+- 实时查看屏幕截图
+- 可视化配置 ROI 区域
+- 服务状态监控
+- 消息流实时显示
+- 响应式设计，支持移动端
+
+**界面布局**：
+```
+┌─────────────────────────────────┐
+│         标题栏                    │
+├──────────────┬──────────────────┤
+│              │   状态卡片        │
+│              │   - 服务状态      │
+│   屏幕截图    │   - 消息计数      │
+│   (noVNC)    │   - 检测器状态    │
+│              │                   │
+│              │   ROI 配置        │
+│              │   - 坐标输入      │
+│              │   - 更新按钮      │
+│              │                   │
+│              │   消息流          │
+│              │   - 实时显示      │
+└──────────────┴──────────────────┘
+```
+
+**主要功能模块**：
+
+1. **VNC 集成**
+   - 嵌入 noVNC iframe，提供远程桌面访问
+   - 支持全屏模式和窗口模式切换
+   - 实时同步微信界面状态
+
+2. **ROI 配置面板**
+   - 左边距（Left）、上边距（Top）、宽度（Width）、高度（Height）输入
+   - 实时预览 ROI 区域
+   - 一键应用配置到 Producer1
+
+3. **状态监控**
+   - 服务运行状态（运行/停止/错误）
+   - 消息计数统计
+   - 检测器状态（ChangeDetector、MessageTypeClassifier）
+   - Redis 连接状态
+
+4. **消息流显示**
+   - 实时显示捕获的微信消息
+   - 消息类型图标（文本、图片、视频、链接）
+   - 发送者头像和时间戳
+   - 支持滚动查看历史消息
+
+### 2. 多实例部署支持
+
+**文件**：`services/wechat_sandbox/docker-compose.multi.yml`
+
+**核心特性**：
+- 支持同时运行多个微信实例
+- 每个实例独立端口映射
+- 共享 Redis 队列
+- 独立的数据卷隔离
+
+**端口映射**：
+
+| 实例 | FastAPI | noVNC | VNC |
+|------|---------|-------|-----|
+| 1 | 8001 | 6081 | 5901 |
+| 2 | 8002 | 6082 | 5902 |
+| 3 | 8003 | 6083 | 5903 |
+
+**配置详情**：
+```yaml
+producer_service_1:
+  build: .
+  container_name: wechat_producer_service_1
+  ports:
+    - "8001:8000"    # FastAPI service port
+    - "6081:6080"    # noVNC Web interface port
+    - "5901:5900"    # VNC service port
+  environment:
+    - DISPLAY=:99
+    - REDIS_HOST=redis
+    - VNC_PASSWORD=vnc123
+    - INSTANCE_ID=1
+  volumes:
+    - wechat_data_1:/app/data
+    - wechat_config_1:/root/.deepin-wine
+  depends_on:
+    - redis
+```
+
+**启动命令**：
+```bash
+docker-compose -f docker-compose.multi.yml up -d
+```
+
+**访问地址**：
+- 实例 1: http://localhost:8001/api/ui, http://localhost:6081
+- 实例 2: http://localhost:8002/api/ui, http://localhost:6082
+- 实例 3: http://localhost:8003/api/ui, http://localhost:6083
+
+### 3. 测试框架
+
+**文件路径**：`services/wechat_sandbox/tests/`
+
+**测试类型**：
+1. **单元测试**：测试单个组件
+   - `test_queue_manager.py` - RedisQueueManager 队列管理器
+   - `test_producer_service.py` - 生产者服务组件（ChangeDetector、MessageTypeClassifier）
+
+2. **API 测试**：测试 FastAPI 接口
+   - `test_api_server.py` - 所有 REST API 端点
+
+3. **集成测试**：测试完整流程
+   - `test_integration.py` - 端到端工作流
+   - Docker 服务测试
+   - 多实例测试
+
+**测试工具**：
+- pytest + pytest-asyncio
+- pytest-html（HTML 报告）
+- pytest-cov（覆盖率）
+- Mock/patch（外部依赖隔离）
+- numpy（视觉组件测试）
+
+**运行测试**：
+```bash
+# 运行所有测试
+pytest tests/ -v --html=reports/test_report.html
+
+# 运行特定测试
+pytest tests/test_queue_manager.py -v
+pytest tests/test_producer_service.py -v
+
+# 生成覆盖率报告
+pytest tests/ --cov=. --cov-report=html
+
+# 查看详细输出
+pytest tests/ -v -s
+```
+
+**测试修复记录**：
+- 修复了 `test_producer_service.py` 中的错误：
+  - 移除了不存在的 `ConsumerProcessor` 导入
+  - 更新了 `ChangeDetector` 测试方法使用正确的阈值（0.05）
+  - 修正了 `detect_changes` 返回值检查（bool 而非 len）
+  - 为 `MessageTypeClassifier` 测试创建了 numpy 图像输入
+  - 修正了分类结果断言（字符串而非 dict）
+
+### 4. MonitorAgent（监控智能体）
 
 **文件路径**：`agents/monitor_agent.py`
 
@@ -136,7 +518,7 @@ await agent.start()
 agent.stop()
 ```
 
-### 2. Orchestrator（工作流编排中心）
+### 5. Orchestrator（工作流编排中心）
 
 **文件路径**：`services/orchestrator/main.py`
 
@@ -184,11 +566,11 @@ POST /workflow/trigger
 }
 ```
 
-### 3. LangGraph 工作流节点
+### 6. LangGraph 工作流节点
 
 **文件路径**：`core/workflows/`
 
-#### 3.1 监控节点 (Monitor Node)
+#### 6.1 监控节点 (Monitor Node)
 
 **文件**：`nodes/monitor_node.py`
 
@@ -201,7 +583,7 @@ POST /workflow/trigger
 **输入**：`raw_message: RawMessage`
 **输出**：更新后的 `AgentState`
 
-#### 3.2 多模态分析节点 (Multimodal Node)
+#### 6.2 多模态分析节点 (Multimodal Node)
 
 **文件**：`nodes/multimodal_node.py`
 
@@ -222,7 +604,7 @@ POST /workflow/trigger
 - 实体提取（人名、时间、地点、任务内容）
 - 上下文理解（结合历史对话和知识库）
 
-#### 3.3 状态跟踪节点 (StateTracker Node)
+#### 6.3 状态跟踪节点 (StateTracker Node)
 
 **文件**：`nodes/state_tracker_node.py`
 
@@ -237,115 +619,89 @@ POST /workflow/trigger
 ┌──────────┐    任务开始    ┌──────────┐
 │  待处理   │ ───────────→ │  进行中   │
 └──────────┘               └──────────┘
-     ↑                         │
+     ↑                        │
      │                    任务完成
-     │                         ↓
-└──────────┘               ┌──────────┐
-│  已完成   │ ←─────────── │  已完成   │
+     │                        ↓
+┌──────────┐              ┌──────────┐
+│  已完成   │ ←─────────── │  进行中   │
 └──────────┘               └──────────┘
 ```
 
-**判断逻辑**：
-```python
-def should_generate_document(state: AgentState) -> str:
-    """判断是否生成文档"""
-    analysis = state.get("multimodal_analysis", {})
-
-    # 判断条件：
-    # 1. 明确的完成信号（"完成了"、"做完了"）
-    # 2. 任务状态标记为完成
-    # 3. 包含生成报告的指令
-
-    if any(signal in analysis.get("text", "") for signal in ["完成", "结束", "报告"]):
-        return "yes"
-    return "no"
-```
-
-#### 3.4 文档生成节点 (Document Node)
+#### 6.4 文档生成节点 (Document Node)
 
 **文件**：`nodes/document_node.py`
 
 **功能**：
-- 根据任务类型选择文档模板
-- 生成 Word 报告文档
-- 更新 Excel 台账
-- 保存文档到指定路径
-- 记录文档更新历史
+- 生成 Excel 台账更新
+- 生成 Word 工作报告
+- 文档模板管理
+- 输出文件存储
 
-**模板系统**：
-```
-templates/
-├── daily_report.j2         # 日报模板
-├── weekly_report.j2        # 周报模板
-├── monthly_report.j2       # 月报模板
-├── task_summary.j2         # 任务汇总模板
-└── meeting_minutes.j2      # 会议纪要模板
-```
+**文档类型**：
+1. **Excel 台账**
+   - 任务列表
+   - 进度追踪
+   - 负责人分配
 
-**输出路径**：
-```
-output/
-├── reports/                # 报告文档
-│   ├── daily_20260109.docx
-│   └── weekly_20260109.docx
-└── ledgers/                # 台账文件
-    └── task_tracker.xlsx
+2. **Word 报告**
+   - 工作总结
+   - 任务详情
+   - 下一步计划
+
+**条件路由**：
+```python
+def should_generate_document(state: AgentState) -> str:
+    """Determine if document should be generated"""
+    analysis = state.get("multimodal_analysis", {})
+    if any(signal in analysis.get("text", "") for signal in ["complete", "end", "report"]):
+        return "yes"
+    return "no"
 ```
 
 ## 📦 数据模型
 
 ### 核心数据结构
 
-**原始消息 (RawMessage)**：
+#### RawMessage（原始消息）
+
 ```python
-class RawMessage(BaseModel):
+@dataclass
+class RawMessage:
     sender: str              # 发送者
     content: str             # 消息内容
-    message_type: MessageType # 消息类型
-    group_id: str            # 群组 ID
-    timestamp: datetime      # 时间戳
-    metadata: dict = {}      # 元数据
-    image_url: Optional[str] = None  # 图片 URL（如果有）
+    message_type: str        # 消息类型
+    timestamp: str           # 时间戳
+    metadata: dict           # 元数据
 ```
 
-**消息类型 (MessageType)**：
+#### AgentState（智能体状态）
+
 ```python
-class MessageType(str, Enum):
-    TEXT = "text"            # 纯文本
-    IMAGE = "image"          # 纯图片
-    TEXT_IMAGE = "text_image" # 图文混合
-    VOICE = "voice"          # 语音（未来支持）
-    VIDEO = "video"          # 视频（未来支持）
-    FILE = "file"            # 文件（未来支持）
+@dataclass
+class AgentState:
+    raw_message: RawMessage          # 原始消息
+    message_analysis: dict            # 消息分析结果
+    multimodal_analysis: dict         # 多模态分析结果
+    task_status: str                  # 任务状态
+    task_history: List[dict]          # 任务历史
+    document_generated: bool         # 是否生成文档
+    document_path: str                # 文档路径
 ```
 
-**智能体状态 (AgentState)**：
+#### RedisMessage（Redis 消息）
+
 ```python
-class AgentState(TypedDict):
-    # 输入
-    raw_message: RawMessage                  # 原始消息
-
-    # 处理结果
-    multimodal_analysis: Optional[dict]      # 多模态分析结果
-    task_status: Optional[str]               # 任务状态
-    document_updates: List[dict]             # 文档更新历史
-
-    # 上下文
-    messages: List[BaseMessage]              # 消息记录
-    context: dict                            # 附加上下文
-    next_action: Optional[str]               # 下一步动作
-```
-
-**多模态分析结果 (MultimodalAnalysis)**：
-```python
-class MultimodalAnalysis(BaseModel):
-    text_summary: str                        # 文本摘要
-    image_description: Optional[str]         # 图片描述
-    intent: str                              # 意图识别
-    entities: Dict[str, Any]                 # 提取的实体
-    task_type: Optional[str]                 # 任务类型
-    confidence: float                        # 置信度
-    rag_context: Optional[List[str]]         # RAG 检索上下文
+{
+    "sender": "张三",
+    "content": "任务已完成",
+    "message_type": "text",
+    "timestamp": "2026-01-09T10:30:00",
+    "metadata": {
+        "bubble_bbox": [100, 200, 300, 150],
+        "has_avatar": True,
+        "group_id": "group_123"
+    }
+}
 ```
 
 ## 🔀 数据流转
@@ -355,130 +711,116 @@ class MultimodalAnalysis(BaseModel):
 ```
 1. 微信消息
    ↓
-2. 微信沙盒容器捕获
+2. Producer1 屏幕监控
+   - ChangeDetector 检测变化
+   - MessageTypeClassifier 分类
    ↓
-3. 生产者服务推送 (SSE)
+3. Producer2 内容提取
+   - 消息气泡提取
+   - 文本/图像解析
    ↓
-4. MonitorAgent 接收
+4. RedisQueueManager
+   - 推送到 Redis Streams
    ↓
-5. HTTP POST 到 Orchestrator
+5. FastAPI SSE 端点
+   - 实时推送消息流
    ↓
-6. LangGraph 工作流执行
-   │
-   ├─→ Monitor Node: 消息验证
-   ├─→ Multimodal Node: AI 分析
-   │   ├─ 文本理解 (LLM)
-   │   ├─ 图像理解 (Vision Model)
-   │   └─ RAG 检索 (Vector DB)
-   ├─→ StateTracker Node: 状态更新
-   │   ├─ 判断任务状态
-   │   ├─ 更新 Redis
-   │   └─ 决策下一步
-   └─→ Document Node: 文档生成
-       ├─ 选择模板
-       ├─ 填充数据
-       ├─ 生成 Word/Excel
-       └─ 保存文件
+6. MonitorAgent
+   - 订阅 SSE 消息
+   - 解析和验证
    ↓
-7. 返回结果
+7. Orchestrator
+   - 接收 HTTP POST 请求
+   - 触发 LangGraph 工作流
+   ↓
+8. LangGraph 节点
+   - Monitor Node: 消息预处理
+   - Multimodal Node: AI 分析
+   - StateTracker Node: 状态跟踪
+   - Document Node: 文档生成（条件触发）
+   ↓
+9. 输出结果
+   - 更新 Excel 台账
+   - 生成 Word 报告
 ```
 
 ### 状态流转
 
 ```
-初始状态
-  ↓
-raw_message (接收消息)
-  ↓
-multimodal_analysis (AI 分析)
-  ↓
-task_status (状态更新)
-  ↓
-判断: 任务完成?
-  ├─ 否 → END (等待下一条消息)
-  └─ 是 → document_updates (生成文档)
-          ↓
-        END
+消息接收 → 消息分析 → 任务识别 → 状态更新 → 文档生成（可选）→ 完成
 ```
 
 ## 🗂️ 项目目录结构
 
 ```
 Mutil_Agent_WechatGroup_RPA/
-├── agents/                              # 智能体模块
-│   └── monitor_agent.py                 # 监控智能体
+├── agent.md                      # AI 智能体系统架构文档
+├── claude.md                     # 项目记忆文档（英文）
+├── claude-cn.md                  # 项目记忆文档（中文）
+├── CLAUDE.md                     # AI 开发规范
 │
-├── config/                              # 配置管理
-│   ├── settings.yaml                    # 主配置文件
-│   └── settings.py                      # Pydantic 配置类
+├── agents/                       # 智能体模块
+│   ├── __init__.py
+│   └── monitor_agent.py          # 监控智能体
 │
-├── core/                                # 核心框架
-│   ├── schemas.py                       # 数据模型定义
-│   ├── state.py                         # LangGraph 状态定义
-│   ├── workflows/                       # 工作流定义
-│   │   ├── main_workflow.py             # 主工作流
-│   │   └── nodes/                       # 工作流节点
-│   │       ├── monitor_node.py          # 监控节点
-│   │       ├── multimodal_node.py       # 多模态分析节点
-│   │       ├── state_tracker_node.py    # 状态跟踪节点
-│   │       └── document_node.py         # 文档生成节点
-│   └── exceptions.py                    # 自定义异常
+├── core/                         # 核心模块
+│   ├── __init__.py
+│   ├── workflows/                # 工作流定义
+│   │   ├── __init__.py
+│   │   ├── agent_graph.py        # LangGraph 工作流图
+│   │   └── state.py              # 状态定义
+│   └── nodes/                    # 工作流节点
+│       ├── __init__.py
+│       ├── monitor_node.py       # 监控节点
+│       ├── multimodal_node.py    # 多模态分析节点
+│       ├── state_tracker_node.py # 状态跟踪节点
+│       └── document_node.py     # 文档生成节点
 │
-├── tools/                               # 工具层
-│   ├── excel_tool.py                    # Excel 更新工具
-│   ├── word_tool.py                     # Word 报告生成工具
-│   └── __init__.py
+├── services/                     # 服务模块
+│   ├── orchestrator/             # 工作流编排服务
+│   │   ├── main.py               # FastAPI 主服务
+│   │   ├── requirements.txt
+│   │   └── Dockerfile
+│   │
+│   └── wechat_sandbox/           # 微信沙盒服务
+│       ├── producer_service/     # 生产者服务
+│       │   ├── __init__.py
+│       │   ├── api_server.py     # FastAPI 服务器
+│       │   ├── queue_manager.py  # Redis 队列管理器
+│       │   ├── producer1_observer.py    # 观察器
+│       │   ├── producer2_content_fetcher.py  # 内容获取器
+│       │   ├── detector.py       # 变化检测器
+│       │   └── classifier.py     # 消息类型分类器
+│       │
+│       ├── static/               # 静态资源
+│       │   └── index.html        # Web UI 管理界面
+│       │
+│       ├── tests/                # 测试文件
+│       │   ├── __init__.py
+│       │   ├── conftest.py       # pytest 配置和 fixtures
+│       │   ├── test_queue_manager.py
+│       │   ├── test_producer_service.py
+│       │   └── test_api_server.py
+│       │
+│       ├── QUICKSTART.md         # 快速开始指南
+│       ├── docker-compose.yml    # 单实例部署配置
+│       ├── docker-compose.multi.yml  # 多实例部署配置
+│       ├── requirements.txt
+│       └── Dockerfile
 │
-├── knowledge_base/                      # 知识库管理
-│   ├── vector_store.py                  # 向量存储管理
-│   └── embeddings.py                    # 嵌入模型管理
+├── output/                       # 输出目录
+│   ├── excel/                    # Excel 台账
+│   └── reports/                  # Word 报告
 │
-├── services/                            # 服务层
-│   ├── orchestrator/                    # 编排中心
-│   │   └── main.py                      # FastAPI 应用
-│   └── wechat_sandbox/                  # 微信沙盒
-│       ├── Dockerfile
-│       ├── start.sh
-│       └── producer_service/            # 消息生产者服务
+├── config/                       # 配置文件
+│   ├── config.yaml               # 主配置文件
+│   ├── ai_config.yaml            # AI 模型配置
+│   └── redis_config.yaml         # Redis 配置
 │
-├── scripts/                             # 工具脚本
-│   ├── init_knowledge_base.py           # 初始化知识库
-│   ├── start_all.py                     # 启动所有服务
-│   └── run_monitor_agent.py             # 运行监控智能体
-│
-├── templates/                           # Jinja2 模板
-│   ├── daily_report.j2                  # 日报模板
-│   ├── weekly_report.j2                 # 周报模板
-│   └── task_summary.j2                  # 任务汇总模板
-│
-├── data/                                # 数据目录
-│   ├── chroma_db/                       # 向量数据库
-│   └── wechat_profile/                  # 微信用户数据
-│
-├── output/                              # 输出目录
-│   ├── reports/                         # 生成的报告
-│   └── ledgers/                         # 台账文件
-│
-├── logs/                                # 日志目录
-│
-├── tests/                               # 测试目录
-│   ├── unit/                            # 单元测试
-│   ├── integration/                     # 集成测试
-│   └── workflows/                       # 工作流测试
-│
-├── docs/                                # 文档目录
-│   ├── ENVIRONMENT_SETUP.md             # 环境配置说明
-│   └── ENVIRONMENT_INIT.md              # 环境初始化指南
-│
-├── docker-compose.yml                   # Docker 编排配置
-├── requirements.txt                     # Python 依赖
-├── environment.yml                      # Conda 环境配置
-├── .env.example                         # 环境变量示例
-├── .gitignore                           # Git 忽略文件
-├── README.md                            # 项目说明
-├── claude.md                            # Claude Code 上下文（英文）
-├── claude-cn.md                         # Claude Code 上下文（中文）
-└── agent.md                             # 本文档：AI 智能体上下文
+└── logs/                         # 日志目录
+    ├── producer_service.log
+    ├── orchestrator.log
+    └── monitor_agent.log
 ```
 
 ## ⚙️ 配置管理
@@ -486,687 +828,314 @@ Mutil_Agent_WechatGroup_RPA/
 ### 配置文件优先级
 
 ```
-系统环境变量 > .env 文件 > settings.yaml > 代码默认值
+命令行参数 > 环境变量 > 配置文件 > 默认值
 ```
 
 ### 环境变量命名规范
 
-使用双下划线表示嵌套配置：
-
-```bash
-# settings.yaml 中：
-# ai:
-#   ollama:
-#     base_url: "http://localhost:11434"
-
-# 对应的环境变量：
-export AI__OLLAMA__BASE_URL="http://localhost:11434"
-```
+- 服务配置：`{SERVICE}_{CONFIG_KEY}`（如 `PRODUCER_SERVICE_PORT`）
+- AI 配置：`AI_{MODEL}_{KEY}`（如 `AI_OLLAMA_BASE_URL`）
+- Redis 配置：`REDIS_{KEY}`（如 `REDIS_HOST`）
+- Docker 配置：`{CONTAINER}_{KEY}`（如 `VNC_PASSWORD`）
 
 ### 主要配置项
 
-```yaml
-# 项目配置
-project:
-  name: "wechat-workflow-agent"
-  env: "development"  # development | production
+#### Producer Service 配置
 
-# AI 模型服务
+```yaml
+producer_service:
+  host: "0.0.0.0"
+  port: 8000
+  redis:
+    host: "redis"
+    port: 6379
+    db: 0
+    stream_name: "wechat_messages"
+  producer1:
+    display: ":99"
+    monitor_interval: 0.5  # 秒
+    roi:
+      left: 0
+      top: 0
+      width: 1920
+      height: 1080
+  producer2:
+    ocr_enabled: true
+    image_quality: 95
+```
+
+#### AI 模型配置
+
+```yaml
 ai:
   ollama:
     base_url: "http://localhost:11434"
     vision_model: "qwen3-vl-8b:latest"
-    embedding_model: "qwen3-embedding-4b"
     chat_model: "qwen3-72b:latest"
-
-# Redis 配置
-redis:
-  host: "localhost"
-  port: 6379
-  lock_db: 1          # 分布式锁数据库
-  cache_db: 0         # 缓存数据库
-
-# 向量数据库
-chroma:
-  persist_directory: "data/chroma_db"
-  collection_name: "wechat_messages"
-
-# 微信沙盒
-wechat_sandbox:
-  docker_image: "wechat-sandbox:latest"
-  data_volume: "wechat-data"
-  producer_service_url: "http://localhost:6789"
-
-# 文档工具
-ai:
-  excel:
-    template_path: "templates/excel_template.xlsx"
-    output_path: "output/ledgers"
-  word:
-    template_dir: "templates"
-    output_path: "output/reports"
-
-# 日志配置
-logging:
-  level: "INFO"        # DEBUG | INFO | WARNING | ERROR
-  format: "json"       # json | text
-  file: "logs/app.log"
+    timeout: 30
+  siliconflow:
+    api_key: "${SILICONFLOW_API_KEY}"
+    base_url: "https://api.siliconflow.cn/v1"
+    embedding_model: "Qwen/Qwen3-Embedding-8B"
+    timeout: 30
 ```
 
-## 🚀 快速开始
+#### LangGraph 配置
 
-### 方式一：使用 Conda 虚拟环境（推荐）
+```yaml
+langgraph:
+  workflow:
+    name: "wechat_agent_workflow"
+    state_schema: "AgentState"
+    interrupt_before: []
+    interrupt_after: []
+  nodes:
+    - monitor
+    - multimodal
+    - state_tracker
+    - document
+```
 
-**Windows 用户**：
+## 🚀 部署指南
+
+### 单实例部署
+
+**启动 Redis**：
 ```bash
-# 1. 创建 Conda 环境
-conda create -n wechat-workflow-agent python=3.12
-
-# 2. 激活环境
-conda activate wechat-workflow-agent
-
-# 3. 进入项目目录
-cd D:\AI\Trae\Mutil_Agent_WechatGroup_RPA\Mutil_Agent_WechatGroup_RPA
-
-# 4. 安装依赖
-pip install -r requirements.txt
-
-# 5. 创建必要的目录
-mkdir data\chroma_db data\wechat_profile output\reports output\ledgers templates logs
-
-# 6. 复制环境变量配置
-copy .env.example .env
-
-# 7. 启动基础设施服务
-docker-compose up -d redis ollama
-
-# 8. 拉取 AI 模型
-docker exec -it ollama ollama pull qwen3-vl-8b
-docker exec -it ollama ollama pull qwen3-embedding-4b
-docker exec -it ollama ollama pull qwen3-72b
-
-# 9. 初始化知识库
-python scripts/init_knowledge_base.py
-
-# 10. 启动编排器
-uvicorn services.orchestrator.main:app --reload --host 0.0.0.0 --port 8000
+docker run -d --name redis -p 6379:6379 redis:7.0
 ```
 
-**Linux/Mac 用户**：
+**启动微信沙盒**：
 ```bash
-# 1. 创建 Conda 环境
-conda create -n wechat-workflow-agent python=3.12
-
-# 2. 激活环境
-conda activate wechat-workflow-agent
-
-# 3. 进入项目目录
-cd /path/to/Mutil_Agent_WechatGroup_RPA
-
-# 4. 安装依赖
-pip install -r requirements.txt
-
-# 5. 创建必要的目录
-mkdir -p data/chroma_db data/wechat_profile output/{reports,ledgers} templates logs
-
-# 6. 复制环境变量配置
-cp .env.example .env
-
-# 7. 启动基础设施服务
-docker-compose up -d redis ollama
-
-# 8. 拉取 AI 模型
-docker exec -it ollama ollama pull qwen3-vl-8b
-docker exec -it ollama ollama pull qwen3-embedding-4b
-docker exec -it ollama ollama pull qwen3-72b
-
-# 9. 初始化知识库
-python scripts/init_knowledge_base.py
-
-# 10. 启动编排器
-uvicorn services.orchestrator.main:app --reload --host 0.0.0.0 --port 8000
+cd services/wechat_sandbox
+docker-compose up -d
 ```
 
-### 方式二：直接安装依赖
-
+**验证部署**：
 ```bash
-# 1. 安装项目依赖
-pip install -e .
+# 检查容器状态
+docker-compose ps
 
-# 2-10. 同方式一的步骤 2-10
+# 查看日志
+docker-compose logs -f producer_service
+
+# 访问 Web UI
+# http://localhost:8000/api/ui
+
+# 访问 noVNC
+# http://localhost:6080
 ```
 
-## 🔧 开发指南
+### 多实例部署
 
-### 添加新的工作流节点
-
-**步骤 1**：创建节点文件
-```python
-# core/workflows/nodes/new_node.py
-from typing import TypedDict
-from ..state import AgentState
-import structlog
-
-logger = structlog.get_logger()
-
-def process(state: AgentState) -> AgentState:
-    """节点处理逻辑
-
-    Args:
-        state: 当前智能体状态
-
-    Returns:
-        更新后的状态
-    """
-    logger.info("执行新节点", state=state)
-
-    # 实现节点逻辑
-    result = "处理结果"
-
-    # 更新状态
-    state["context"]["new_node_result"] = result
-
-    return state
+**启动多实例**：
+```bash
+cd services/wechat_sandbox
+docker-compose -f docker-compose.multi.yml up -d
 ```
 
-**步骤 2**：注册到工作流
-```python
-# core/workflows/main_workflow.py
-from .nodes.new_node import process as new_node_process
+**访问不同实例**：
+- 实例 1: http://localhost:8001/api/ui, http://localhost:6081
+- 实例 2: http://localhost:8002/api/ui, http://localhost:6082
+- 实例 3: http://localhost:8003/api/ui, http://localhost:6083
 
-def create_workflow():
-    workflow = StateGraph(AgentState)
+**验证多实例**：
+```bash
+# 检查所有容器状态
+docker-compose -f docker-compose.multi.yml ps
 
-    # 添加节点
-    workflow.add_node("new_node", new_node_process)
-
-    # 添加边（定义节点间的连接）
-    workflow.add_edge("multimodal", "new_node")
-    workflow.add_edge("new_node", "state_tracker")
-
-    return workflow.compile()
+# 查看特定实例日志
+docker logs wechat_producer_service_1
+docker logs wechat_producer_service_2
+docker logs wechat_producer_service_3
 ```
 
-### 添加新的工具
-
-**步骤 1**：创建工具类
-```python
-# tools/new_tool.py
-from typing import Dict, Any
-from config.settings import settings
-import structlog
-
-logger = structlog.get_logger()
-
-class NewTool:
-    """新工具类"""
-
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        logger.info("初始化工具", config=config)
-
-    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """执行工具操作
-
-        Args:
-            data: 输入数据
-
-        Returns:
-            执行结果
-        """
-        logger.info("执行工具", data=data)
-
-        # 实现工具逻辑
-        result = {"status": "success", "data": data}
-
-        return result
-```
-
-**步骤 2**：注册工具
-```python
-# tools/__init__.py
-from .new_tool import NewTool
-
-__all__ = ["WordTool", "ExcelTool", "NewTool"]
-```
-
-**步骤 3**：在工作流节点中使用
-```python
-from tools import NewTool
-
-def process(state: AgentState) -> AgentState:
-    tool = NewTool(config=settings.ai.new_tool)
-    result = tool.execute({"key": "value"})
-    state["context"]["tool_result"] = result
-    return state
-```
-
-### 扩展消息类型
-
-**步骤 1**：更新枚举
-```python
-# core/schemas.py
-class MessageType(str, Enum):
-    TEXT = "text"
-    IMAGE = "image"
-    TEXT_IMAGE = "text_image"
-    VOICE = "voice"      # 新增语音类型
-    VIDEO = "video"      # 新增视频类型
-    FILE = "file"        # 新增文件类型
-```
-
-**步骤 2**：在多模态节点中添加处理逻辑
-```python
-# core/workflows/nodes/multimodal_node.py
-
-async def handle_voice_message(message: RawMessage) -> dict:
-    """处理语音消息"""
-    # 1. 下载语音文件
-    # 2. 使用 Whisper 转文字
-    # 3. 返回文本内容
-    pass
-
-async def handle_video_message(message: RawMessage) -> dict:
-    """处理视频消息"""
-    # 1. 下载视频文件
-    # 2. 提取关键帧
-    # 3. 使用视觉模型分析
-    pass
-```
-
-### 自定义文档模板
-
-**步骤 1**：创建 Jinja2 模板
-```jinja2
-{# templates/custom_report.j2 #}
----
-title: {{ title }}
-date: {{ date|strftime('%Y-%m-%d') %}
-author: {{ author }}
----
-
-# {{ title }}
-
-**生成时间**: {{ date }}
-**作者**: {{ author }}
-
-## 任务列表
-
-{% for task in tasks %}
-### {{ task.name }}
-- 状态: {{ task.status }}
-- 负责人: {{ task.assignee }}
-- 截止日期: {{ task.deadline }}
-- 描述: {{ task.description }}
-{% endfor %}
-
-## 统计信息
-
-- 总任务数: {{ tasks|length }}
-- 已完成: {{ tasks|selectattr('status', 'equalto', 'completed')|list|length }}
-- 进行中: {{ tasks|selectattr('status', 'equalto', 'in_progress')|list|length }}
-```
-
-**步骤 2**：使用模板生成文档
-```python
-from tools.word_tool import WordTool
-
-tool = WordTool(config=settings.ai.word)
-tool.generate_from_template(
-    template_path="templates/custom_report.j2",
-    output_path="output/reports/custom.docx",
-    context={
-        "title": "自定义报告",
-        "date": datetime.now(),
-        "author": "AI 智能体",
-        "tasks": [...]
-    }
-)
-```
-
-## 🧪 测试
+## 🧪 测试指南
 
 ### 运行测试
 
 ```bash
+cd services/wechat_sandbox
+
 # 运行所有测试
-pytest
+pytest tests/ -v
+
+# 生成 HTML 报告
+pytest tests/ -v --html=reports/test_report.html
 
 # 运行特定测试文件
-pytest tests/test_workflow.py
-
-# 运行特定测试函数
-pytest tests/test_workflow.py::test_multimodal_node
+pytest tests/test_queue_manager.py -v
+pytest tests/test_producer_service.py -v
 
 # 生成覆盖率报告
-pytest --cov=core --cov=services --cov=agents --cov-report=html
-
-# 显示详细输出
-pytest -v
-
-# 只运行失败的测试
-pytest --lf
+pytest tests/ --cov=. --cov-report=html
 ```
 
-### 编写测试
+### 测试类型
 
-```python
-# tests/workflows/test_multimodal_node.py
-import pytest
-from core.workflows.nodes.multimodal_node import process
-from core.state import AgentState
-from core.schemas import RawMessage, MessageType
+1. **单元测试**
+   - 测试单个组件功能
+   - 使用 mock 隔离外部依赖
+   - 快速执行，无网络/数据库依赖
 
-@pytest.mark.asyncio
-async def test_text_message_processing():
-    """测试文本消息处理"""
-    # 准备测试数据
-    state: AgentState = {
-        "raw_message": RawMessage(
-            sender="张三",
-            content="请生成本周工作周报",
-            message_type=MessageType.TEXT,
-            group_id="test_group",
-            timestamp=datetime.now()
-        ),
-        "multimodal_analysis": None,
-        "task_status": None,
-        "document_updates": [],
-        "messages": [],
-        "context": {},
-        "next_action": None
-    }
+2. **API 测试**
+   - 测试 FastAPI 端点
+   - 验证请求/响应格式
+   - 测试错误处理
 
-    # 执行节点
-    result = await process(state)
+3. **集成测试**
+   - 测试完整工作流
+   - 需要 Redis 和 Docker 环境
+   - 验证组件间协作
 
-    # 验证结果
-    assert result["multimodal_analysis"] is not None
-    assert result["multimodal_analysis"]["intent"] == "generate_report"
-```
+## 📊 性能优化
 
-## 🐛 故障排查
+### 微信沙盒优化
 
-### 常见问题及解决方案
+1. **ROI 配置**
+   - 只监控消息区域，减少截图面积
+   - 提高检测效率，降低 CPU 使用率
 
-#### 1. 容器启动失败
+2. **检测间隔**
+   - 根据消息频率调整监控间隔
+   - 建议值：0.3-1.0 秒
 
-**症状**：`docker-compose up` 报错
+3. **图像处理**
+   - 降低截图分辨率（如 720p）
+   - 使用灰度图像进行变化检测
 
-**排查步骤**：
-```bash
-# 检查 Docker 是否运行
-docker ps
+### LangGraph 工作流优化
 
-# 检查端口占用
-# Windows:
-netstat -ano | findstr "5800"
-netstat -ano | findstr "6379"
-netstat -ano | findstr "11434"
+1. **缓存策略**
+   - Redis 缓存分析结果
+   - 避免重复计算
 
-# Linux/Mac:
-lsof -i :5800
-lsof -i :6379
-lsof -i :11434
+2. **并发控制**
+   - 使用异步处理提高吞吐量
+   - 限制并发工作流数量
 
-# 查看容器日志
-docker-compose logs wechat-sandbox
-docker-compose logs redis
-docker-compose logs ollama
-```
-
-**解决方案**：
-- 停止占用端口的服务
-- 删除旧容器：`docker-compose down -v`
-- 重新启动：`docker-compose up -d`
-
-#### 2. 工作流执行失败
-
-**症状**：API 返回 500 错误
-
-**排查步骤**：
-```bash
-# 检查 Ollama 服务
-curl http://localhost:11434/api/tags
-
-# 检查 Redis 连接
-redis-cli ping
-
-# 查看编排器日志
-# (查看运行 uvicorn 的终端输出)
-
-# 检查模型是否加载
-docker exec -it ollama ollama list
-```
-
-**解决方案**：
-- 确保 Ollama 服务正常运行
-- 重新拉取模型：`docker exec -it ollama ollama pull qwen3-vl-8b`
-- 重启 Redis：`docker-compose restart redis`
-
-#### 3. 消息流断开
-
-**症状**：MonitorAgent 无法接收消息
-
-**排查步骤**：
-```bash
-# 检查生产者服务
-curl http://localhost:6789/stream
-
-# 检查容器状态
-docker ps | grep wechat-sandbox
-
-# 查看容器日志
-docker logs wechat-sandbox --tail 100
-```
-
-**解决方案**：
-- 重启微信沙盒容器
-- 检查 noVNC 界面是否正常显示
-- 重新启动 MonitorAgent
-
-#### 4. 模型调用超时
-
-**症状**：Ollama 请求超时
-
-**排查步骤**：
-```bash
-# 检查模型是否正确加载
-docker exec -it ollama ollama list
-
-# 测试模型推理
-docker exec -it ollama ollama run qwen3-vl-8b "测试"
-
-# 查看 Ollama 日志
-docker logs ollama --tail 50
-```
-
-**解决方案**：
-- 增加 Ollama 超时时间配置
-- 使用更小的模型（如 qwen3-vl-3b）
-- 增加 Docker 内存限制
-
-### 调试技巧
-
-#### 启用详细日志
-
-```python
-# .env 文件
-LOGGING__LEVEL=DEBUG
-LOGGING__FORMAT=json
-```
-
-#### 打印工作流状态
-
-```python
-# 在节点中添加调试输出
-def debug_node(state: AgentState) -> AgentState:
-    print(f"当前状态:\n{json.dumps(state, indent=2, ensure_ascii=False)}")
-    return state
-```
-
-#### 可视化工作流图
-
-```python
-from core.workflows.main_workflow import create_workflow
-
-workflow = create_workflow()
-print(workflow.get_graph().print_ascii())
-```
+3. **模型选择**
+   - 根据任务复杂度选择合适的模型
+   - 简单任务使用小模型
 
 ## 🔒 安全注意事项
 
 1. **敏感信息保护**
-   - 不要在代码中硬编码密钥
-   - 使用环境变量管理敏感配置
-   - `.env` 文件已加入 `.gitignore`
+   - 不要在代码中硬编码 API Key
+   - 使用环境变量或密钥管理系统
+   - 日志中脱敏敏感信息
 
-2. **输入验证**
-   - 验证所有用户输入
-   - 防止注入攻击
-   - 限制文件上传大小和类型
+2. **网络安全**
+   - 生产环境使用 HTTPS
+   - 配置防火墙规则
+   - 限制 API 访问频率
 
-3. **容器隔离**
-   - 使用 Docker 网络隔离服务
-   - 限制容器资源使用
+3. **容器安全**
+   - 使用非 root 用户运行容器
    - 定期更新基础镜像
+   - 限制容器资源使用
 
-4. **API 安全**
-   - 实现身份认证（JWT、API Key）
-   - 使用 HTTPS（生产环境）
-   - 添加速率限制
+## 🛠️ 故障排查
 
-5. **日志脱敏**
-   - 避免记录敏感信息
-   - 对日志进行访问控制
-   - 定期清理旧日志
+### 微信沙盒问题
 
-## 📚 扩展资源
+**问题：无法启动微信客户端**
+- 检查 Xvfb 虚拟显示是否正常
+- 查看 Docker 容器日志：`docker logs wechat_producer_service`
+- 确认 DISPLAY 环境变量配置正确
 
-### 官方文档
-- [LangGraph 文档](https://python.langchain.com/docs/langgraph)
-- [LangChain 文档](https://python.langchain.com/docs)
-- [Ollama 文档](https://ollama.ai/docs)
-- [FastAPI 文档](https://fastapi.tiangolo.com)
-- [ChromaDB 文档](https://docs.trychroma.com)
+**问题：无法检测到新消息**
+- 检查 ROI 区域配置是否正确
+- 查看屏幕截图：`curl http://localhost:8000/api/screenshot`
+- 调整 ChangeDetector 阈值参数
 
-### 项目文档
-- `README.md` - 项目概述和快速开始
-- `claude.md` - Claude Code 上下文（英文）
-- `claude-cn.md` - Claude Code 上下文（中文）
-- `docs/ENVIRONMENT_SETUP.md` - 环境配置说明
-- `docs/ENVIRONMENT_INIT.md` - 环境初始化指南
+**问题：noVNC 无法连接**
+- 检查 noVNC 容器是否正常运行
+- 确认 VNC 密码配置正确
+- 查看浏览器控制台错误信息
 
-### 相关技术
-- Python 异步编程：`asyncio`
-- 结构化日志：`structlog`
-- 配置管理：`pydantic-settings`
-- 容器化：`Docker`, `docker-compose`
-- 测试框架：`pytest`
+### LangGraph 工作流问题
+
+**问题：工作流执行失败**
+- 检查 Orchestrator 日志
+- 验证 AI 模型服务是否可用
+- 确认 Redis 连接正常
+
+**问题：状态跟踪异常**
+- 检查 Redis 缓存数据
+- 验证状态转换逻辑
+- 查看工作流执行日志
+
+## 📚 参考资源
+
+- [LangGraph 官方文档](https://python.langchain.com/docs/langgraph)
+- [FastAPI 官方文档](https://fastapi.tiangolo.com/)
+- [Ollama 官方文档](https://ollama.ai/docs)
+- [Redis Streams 文档](https://redis.io/docs/data-types/streams/)
+- [OpenCV Python 教程](https://docs.opencv.org/4.x/d6/d00/tutorial_py_root.html)
 
 ## 📝 开发规范
 
 ### 代码风格
 
-- **类型提示**：所有函数必须添加类型提示
-- **文档字符串**：使用 Google 风格的 docstrings
-- **命名规范**：
-  - 类名：大驼峰（`MonitorAgent`）
-  - 函数/变量：小写下划线（`process_message`）
-  - 常量：大写下划线（`MAX_RETRIES`）
-- **导入顺序**：标准库 → 第三方库 → 本地模块
+- 遵循 PEP 8 Python 编码规范
+- 使用类型注解（Type Hints）
+- 编写清晰的文档字符串（Docstrings）
+- 函数和变量命名使用 snake_case
+- 类名使用 PascalCase
 
-### 异步编程规范
+### Git 提交规范
 
-```python
-# ✅ 正确：使用 async/await
-async def process_message(message: RawMessage) -> dict:
-    result = await ai_model.analyze(message)
-    return result
+```
+<类型>: <简要描述>
 
-# ❌ 错误：阻塞调用
-async def process_message(message: RawMessage) -> dict:
-    result = ai_model.analyze(message)  # 缺少 await
-    return result
+类型：新增 | 修复 | 重构 | 优化 | 文档 | 配置
 ```
 
-### 错误处理规范
-
-```python
-# ✅ 正确：捕获特定异常
-from core.exceptions import MessageValidationError
-
-try:
-    validated = validate_message(message)
-except MessageValidationError as e:
-    logger.error("消息验证失败", error=str(e))
-    raise
-
-# ❌ 错误：捕获所有异常
-try:
-    validated = validate_message(message)
-except Exception:  # 过于宽泛
-    pass
+示例：
+```
+新增: 添加多实例 Docker 部署支持
+修复: 修复 ChangeDetector 阈值配置错误
+优化: 优化 ROI 检测性能
 ```
 
-### 日志记录规范
+### 测试要求
 
-```python
-import structlog
-
-logger = structlog.get_logger()
-
-# ✅ 正确：使用结构化日志
-logger.info("处理消息",
-            sender=message.sender,
-            message_type=message.message_type,
-            message_id=message.id)
-
-# ❌ 错误：字符串拼接
-logger.info(f"处理来自 {message.sender} 的消息")
-```
+1. 新功能必须编写单元测试
+2. 测试覆盖率不低于 80%
+3. 提交前运行所有测试
+4. 集成测试需要完整的 Docker 环境
 
 ## 🎯 项目路线图
 
 ### 已完成 ✅
-- [x] 基础架构搭建
-- [x] LangGraph 工作流实现
-- [x] 多模态消息处理（文本+图像）
-- [x] 基础文档生成（Word、Excel）
-- [x] Redis 状态管理
-- [x] ChromaDB 知识库
+
+- [x] 微信沙盒容器化部署
+- [x] 屏幕监控和消息捕获
+- [x] FastAPI 服务和 SSE 消息流
+- [x] LangGraph 工作流引擎
+- [x] 多模态 AI 分析（文本+图像）
+- [x] 任务状态跟踪
+- [x] Web UI 管理界面
+- [x] noVNC 远程桌面集成
+- [x] 多实例 Docker 部署
+- [x] Redis 队列管理
+- [x] 单元测试和集成测试
+- [x] 文档生成（Excel/Word）
 
 ### 进行中 🚧
-- [ ] 语音消息支持（Whisper）
-- [ ] Web 管理界面
-- [ ] 性能优化和缓存策略
+
+- [ ] 完善 RAG 增强功能
+- [ ] 优化 AI 模型性能
+- [ ] 增加更多消息类型识别
+- [ ] 改进 ROI 自动配置
 
 ### 计划中 📋
-- [ ] 视频消息支持
-- [ ] 文件处理能力
-- [ ] 企业微信 API 集成
-- [ ] 数据分析和可视化
-- [ ] 多租户支持
-- [ ] 云端部署方案
 
-## 📞 支持与反馈
-
-### 问题报告
-如遇到问题，请提供以下信息：
-1. 系统环境（操作系统、Python 版本）
-2. 错误信息和堆栈跟踪
-3. 相关配置和日志
-4. 复现步骤
-
-### 贡献指南
-欢迎提交 Pull Request！请确保：
-1. 代码符合项目规范
-2. 添加必要的测试
-3. 更新相关文档
-4. 通过所有测试
-
----
-
-**文档版本**: v1.0.0
-**最后更新**: 2026-01-09
-**维护者**: 项目团队
+- [ ] 支持更多 AI 模型
+- [ ] 添加消息模板系统
+- [ ] 实现多用户权限管理
+- [ ] 支持自定义工作流
+- [ ] 添加性能监控和告警
+- [ ] 支持云原生部署（Kubernetes）
+- [ ] 移动端应用

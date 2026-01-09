@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: wechat_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  producer_service:
+    build: .
+    container_name: wechat_producer_service
+    ports:
+      - "8000:8000"    # FastAPI服务端口
+      - "6080:6080"    # noVNC Web界面端口
+      - "5900:5900"    # VNC服务端口
+    environment:
+      - DISPLAY=:99
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - VNC_PASSWORD=vnc123
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./media:/app/media
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+
+volumes:
+  redis_data:
