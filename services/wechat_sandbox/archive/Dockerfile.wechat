@@ -5,7 +5,7 @@ WORKDIR /app
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:99
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --fix-missing \
     xvfb \
     x11-apps \
     fluxbox \
@@ -41,17 +41,22 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     libatomic1 \
-    desktop-file-utils \
-    && rm -rf /var/lib/apt/lists/*
+    libxkbcommon-x11-0 \
+    desktop-file-utils 
+#    \
+#    && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /root/.vnc && \
     chmod 700 /root/.vnc
 
 COPY WeChatLinux_x86_64.deb /tmp/
+COPY fonts-noto-cjk_20240730+repack1-1_all.deb /tmp/
 
-RUN dpkg --force-depends -i /tmp/WeChatLinux_x86_64.deb && apt-get install -y -f
+RUN dpkg -i /tmp/fonts-noto-cjk_20240730+repack1-1_all.deb && \
+    dpkg --force-depends -i /tmp/WeChatLinux_x86_64.deb && \
+    apt-get install -y -f
 
-RUN rm /tmp/WeChatLinux_x86_64.deb
+#RUN rm /tmp/WeChatLinux_x86_64.deb /tmp/fonts-noto-cjk_20240730+repack1-1_all.deb
 
 RUN mkdir -p /app/media /app/logs
 

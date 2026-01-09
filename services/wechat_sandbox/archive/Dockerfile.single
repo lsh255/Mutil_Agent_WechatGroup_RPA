@@ -12,23 +12,17 @@
 #   8. 配置层（经常变动）
 # =====================================================
 
-# 使用 Ubuntu 22.04 作为基础镜像
 FROM ubuntu:22.04
 
-# 设置工作目录为 /app
 WORKDIR /app
 
-# 设置非交互模式，避免安装时弹出提示
 ENV DEBIAN_FRONTEND=noninteractive
-# 设置虚拟显示器编号
 ENV DISPLAY=:99
-# 禁用 Python 输出缓冲，使日志实时显示
 ENV PYTHONUNBUFFERED=1
 
 # =====================================================
 # 层 1：基础系统工具（几乎不变）
 # =====================================================
-# 更新包列表并安装基础工具
 RUN apt-get update && apt-get install -y --fix-missing \
     wget \
     curl \
@@ -38,7 +32,6 @@ RUN apt-get update && apt-get install -y --fix-missing \
 # =====================================================
 # 层 2：桌面环境（VNC + noVNC + X11 + Fluxbox）
 # =====================================================
-# 更新包列表并安装桌面环境
 RUN apt-get update && apt-get install -y --fix-missing \
     xvfb \
     x11-apps \
@@ -54,7 +47,6 @@ RUN apt-get update && apt-get install -y --fix-missing \
 # =====================================================
 # 层 3：WeChat 基础依赖（GUI 库 + 多媒体库）
 # =====================================================
-# 更新包列表并安装 WeChat 依赖
 RUN apt-get update && apt-get install -y --fix-missing \
     libgl1-mesa-glx \
     libglib2.0-0 \
@@ -84,7 +76,6 @@ RUN apt-get update && apt-get install -y --fix-missing \
 # =====================================================
 # 层 4：字体支持
 # =====================================================
-# 更新包列表并安装中文字体
 RUN apt-get update && apt-get install -y --fix-missing \
     fonts-wqy-microhei \
     fonts-wqy-zenhei \
@@ -93,24 +84,19 @@ RUN apt-get update && apt-get install -y --fix-missing \
 # =====================================================
 # 层 5：复制并安装本地字体包
 # =====================================================
-# 复制本地 Noto CJK 字体包到临时目录
-COPY build/fonts-noto-cjk_20240730+repack1-1_all.deb /tmp/
-# 安装 Noto CJK 字体包
+COPY fonts-noto-cjk_20240730+repack1-1_all.deb /tmp/
 RUN dpkg -i /tmp/fonts-noto-cjk_20240730+repack1-1_all.deb
 
 # =====================================================
 # 层 6：WeChat 应用安装
 # =====================================================
-# 复制本地 WeChat 安装包到临时目录
-COPY build/WeChatLinux_x86_64.deb /tmp/
-# 强制安装 WeChat（忽略依赖错误）并修复缺失依赖
+COPY WeChatLinux_x86_64.deb /tmp/
 RUN dpkg --force-depends -i /tmp/WeChatLinux_x86_64.deb && \
     apt-get install -y -f
 
 # =====================================================
 # 层 7：依赖补丁层（后续发现缺失依赖可在此添加）
 # =====================================================
-# 更新包列表并安装补丁依赖
 RUN apt-get update && apt-get install -y --fix-missing \
     libxkbcommon-x11-0 \
     libxcb-icccm4 \
@@ -126,7 +112,6 @@ RUN apt-get update && apt-get install -y --fix-missing \
 # =====================================================
 # 层 8：Python 环境（可选，如需 Python 功能）
 # =====================================================
-# 更新包列表并安装 Python
 RUN apt-get update && apt-get install -y --fix-missing \
     python3 \
     python3-pip \
@@ -136,20 +121,14 @@ RUN apt-get update && apt-get install -y --fix-missing \
 # =====================================================
 # 层 9：配置与启动脚本
 # =====================================================
-# 创建 VNC 配置目录并设置权限
 RUN mkdir -p /root/.vnc && \
     chmod 700 /root/.vnc
 
-# 创建媒体和日志目录
 RUN mkdir -p /app/media /app/logs
 
-# 复制启动脚本到容器
 COPY start_wechat.sh /app/
-# 设置启动脚本可执行权限
 RUN chmod +x /app/start_wechat.sh
 
-# 暴露 noVNC (6080) 和 VNC (5900) 端口
 EXPOSE 6080 5900
 
-# 容器启动时执行启动脚本
 CMD ["/app/start_wechat.sh"]

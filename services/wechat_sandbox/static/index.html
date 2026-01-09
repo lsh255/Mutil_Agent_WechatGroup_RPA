@@ -4,13 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WeChat监控服务管理界面</title>
+    <!-- 页面样式 -->
     <style>
+        /* 全局样式重置 */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
+        /* 页面主体样式 */
         body {
             font-family: 'Microsoft YaHei', Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -18,6 +21,7 @@
             padding: 20px;
         }
 
+        /* 主容器样式 */
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -27,6 +31,7 @@
             overflow: hidden;
         }
 
+        /* 页面头部样式 */
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -44,6 +49,7 @@
             font-size: 14px;
         }
 
+        /* 主内容区域 - 左右两栏布局 */
         .main-content {
             display: grid;
             grid-template-columns: 1fr 350px;
@@ -51,6 +57,7 @@
             padding: 20px;
         }
 
+        /* 远程桌面屏幕区域 */
         .screen-section {
             background: #f8f9fa;
             border-radius: 8px;
@@ -90,12 +97,14 @@
             border: none;
         }
 
+        /* 右侧控制面板 */
         .control-panel {
             background: #f8f9fa;
             border-radius: 8px;
             padding: 20px;
         }
 
+        /* 服务状态卡片 */
         .status-card {
             background: white;
             border-radius: 8px;
@@ -124,6 +133,7 @@
             color: #ef4444;
         }
 
+        /* ROI监控区域配置 */
         .roi-section {
             background: white;
             border-radius: 8px;
@@ -200,6 +210,7 @@
             background: #dc2626;
         }
 
+        /* 日志显示区域 */
         .log-section {
             background: white;
             border-radius: 8px;
@@ -373,7 +384,7 @@
             }
         }
 
-        // 截屏预览
+        // 截屏预览功能
         async function captureScreen() {
             addLog('正在截屏...');
             try {
@@ -392,7 +403,7 @@
             }
         }
 
-        // 重启服务
+        // 重启服务功能
         async function restartService() {
             if (confirm('确定要重启服务吗？')) {
                 addLog('正在重启服务...');
@@ -414,7 +425,7 @@
             }
         }
 
-        // 更新服务状态
+        // 更新服务状态显示
         async function updateStatus() {
             try {
                 const response = await fetch(`${API_BASE}/status`);
@@ -441,7 +452,7 @@
             }
         }
 
-        // 添加日志
+        // 添加日志到日志区域
         function addLog(message) {
             const logContent = document.getElementById('log-content');
             const timestamp = new Date().toLocaleTimeString();

@@ -100,26 +100,26 @@ class MessageTypeClassifier:
         """
         try:
             # 检测三角形形状（播放按钮）
-            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if len(image.shape) == 3 else image
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if len(image.shape) == 3 else image  # 转换为灰度图
             
             # 使用边缘检测
-            edges = cv2.Canny(gray, 50, 150)
+            edges = cv2.Canny(gray, 50, 150)  # Canny边缘检测算法
             
             # 查找轮廓
             contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
-            for contour in contours:
+            for contour in contours:  # 遍历所有轮廓
                 # 计算轮廓的凸包
                 hull = cv2.convexHull(contour)
                 
                 # 计算凸包的顶点数
-                if len(hull) == 3:  # 三角形
-                    area = cv2.contourArea(contour)
+                if len(hull) == 3:  # 三角形（播放按钮形状）
+                    area = cv2.contourArea(contour)  # 计算轮廓面积
                     if area > 30:  # 面积足够大
-                        return True
+                        return True  # 检测到播放按钮，返回True
             
-            return False
+            return False  # 未检测到播放按钮，返回False
             
-        except Exception as e:
-            logger.error(f"检测视频图标失败: {e}")
-            return False
+        except Exception as e:  # 捕获异常
+            logger.error(f"检测视频图标失败: {e}")  # 记录错误日志
+            return False  # 返回False
