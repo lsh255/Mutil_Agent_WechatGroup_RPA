@@ -1,6 +1,6 @@
 from typing import Dict, Any, Optional
 from langchain_community.chat_models import ChatOllama
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from ...state import AgentState
 from ...schemas import MultimodalAnalysis, TaskType, TaskPhase
@@ -16,9 +16,10 @@ class MultimodalNode:
             model=settings.ai.ollama.vision_model,
             base_url=settings.ai.ollama.base_url
         )
-        self.embeddings = OllamaEmbeddings(
-            model=settings.ai.ollama.embedding_model,
-            base_url=settings.ai.ollama.base_url
+        self.embeddings = OpenAIEmbeddings(
+            model=settings.ai.siliconflow.embedding_model,
+            openai_api_key=settings.ai.siliconflow.api_key,
+            openai_api_base=settings.ai.siliconflow.base_url
         )
         self.vector_store = Chroma(
             persist_directory=settings.vector_store.persist_directory,

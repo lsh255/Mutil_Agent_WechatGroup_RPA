@@ -19,12 +19,19 @@ class OllamaConfig(BaseModel):
     """Ollama AI模型服务配置"""
     base_url: str = "http://localhost:11434"
     vision_model: str = "qwen3-vl-8b:latest"
-    embedding_model: str = "qwen3-embedding-4b"
+
+
+class SiliconFlowConfig(BaseModel):
+    """硅基流动 AI模型服务配置"""
+    api_key: str = ""
+    base_url: str = "https://api.siliconflow.cn/v1"
+    embedding_model: str = "Qwen/Qwen3-Embedding-8B"
 
 
 class AIConfig(BaseModel):
     """AI相关配置"""
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    siliconflow: SiliconFlowConfig = Field(default_factory=SiliconFlowConfig)
 
 
 class VectorStoreConfig(BaseModel):

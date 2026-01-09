@@ -1,5 +1,5 @@
 from langchain_chroma import Chroma
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain.schema import Document
 from typing import List, Optional
 from pathlib import Path
@@ -11,9 +11,10 @@ class VectorStoreManager:
     
     def __init__(self):
         """初始化向量存储管理器"""
-        self.embeddings = OllamaEmbeddings(
-            model=settings.ai.ollama.embedding_model,
-            base_url=settings.ai.ollama.base_url
+        self.embeddings = OpenAIEmbeddings(
+            model=settings.ai.siliconflow.embedding_model,
+            openai_api_key=settings.ai.siliconflow.api_key,
+            openai_api_base=settings.ai.siliconflow.base_url
         )
         
         # 确保持久化目录存在
