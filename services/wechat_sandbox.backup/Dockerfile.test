@@ -1,0 +1,51 @@
+# 构建参数，指定基础镜像名称
+ARG BASE_IMAGE=wechat_sandbox:latest
+# 使用构建参数指定基础镜像
+FROM $BASE_IMAGE
+
+# 维护者标签
+LABEL maintainer="test"
+# 镜像描述标签
+LABEL description="WeChat Sandbox with FastAPI for testing environment"
+
+# 禁用 Python 输出缓冲，使日志实时显示
+ENV PYTHONUNBUFFERED=1
+# 设置 FastAPI 环境为测试
+ENV FASTAPI_ENV=testing
+
+# 更新包列表并安装 Python 依赖
+RUN apt-get update && apt-get install -y --fix-missing \
+    python3-pip \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Python 包（不使用缓存）
+RUN pip3 install --no-cache-dir \
+    fastapi==0.104.1 \
+    uvicorn[standard]==0.24.0 \
+    redis==5.0.1 \
+    pydantic==2.5.0 \
+    pydantic-settings==2.1.0 \
+    python-multipart==0.0.6 \
+    aiofiles==23.2.1
+
+# 设置工作目录为 /app
+WORKDIR /app
+
+# 复制 FastAPI 应用代码到容器
+COPY app/ /app/app/
+
+# 复制主启动脚本到容器
+COPY main.py /app/main.py
+
+# 复制微信启动脚本到容器
+COPY start_wechat.sh /app/start_wechat.sh
+
+# 创建日志和媒体目录
+RUN mkdir -p /app/logs /app/media
+
+# 暴露 FastAPI 端口
+EXPOSE 8000
+
+# 容器启动时执行启动脚本
+CMD ["/bin/bash", "/app/start_wechat.sh"]

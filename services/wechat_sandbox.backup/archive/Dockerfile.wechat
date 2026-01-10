@@ -1,0 +1,70 @@
+FROM ubuntu:22.04
+
+WORKDIR /app
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DISPLAY=:99
+
+RUN apt-get update && apt-get install -y --fix-missing \
+    xvfb \
+    x11-apps \
+    fluxbox \
+    tigervnc-standalone-server \
+    tigervnc-common \
+    tigervnc-tools \
+    novnc \
+    websockify \
+    x11vnc \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgtk-3-0 \
+    libnotify4 \
+    libnss3 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils \
+    libatspi2.0-0 \
+    libappindicator3-1 \
+    libsecret-1-0 \
+    libgbm1 \
+    libdbus-1-3 \
+    libasound2 \
+    libpulse0 \
+    libpci3 \
+    libpci-dev \
+    fonts-wqy-microhei \
+    fonts-wqy-zenhei \
+    wget \
+    curl \
+    libatomic1 \
+    libxkbcommon-x11-0 \
+    desktop-file-utils 
+#    \
+#    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /root/.vnc && \
+    chmod 700 /root/.vnc
+
+COPY WeChatLinux_x86_64.deb /tmp/
+COPY fonts-noto-cjk_20240730+repack1-1_all.deb /tmp/
+
+RUN dpkg -i /tmp/fonts-noto-cjk_20240730+repack1-1_all.deb && \
+    dpkg --force-depends -i /tmp/WeChatLinux_x86_64.deb && \
+    apt-get install -y -f
+
+#RUN rm /tmp/WeChatLinux_x86_64.deb /tmp/fonts-noto-cjk_20240730+repack1-1_all.deb
+
+RUN mkdir -p /app/media /app/logs
+
+ENV PYTHONUNBUFFERED=1
+
+COPY start_wechat.sh /app/
+RUN chmod +x /app/start_wechat.sh
+
+EXPOSE 6080 5900
+
+CMD ["/app/start_wechat.sh"]

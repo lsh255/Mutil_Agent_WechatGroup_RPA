@@ -1,0 +1,735 @@
+# WeChat 沙箱服务 - 技术上下文文档
+
+> 本文档提供 WeChat 沙箱服务的完整技术上下文，包括架构设计、组件职责、数据流和开发约定。
+
+## 项目概述
+
+**服务名称**: WeChat Sandbox Service (微信沙箱服务)
+
+**核心价值**: 提供隔离的 Linux 微信运行环境，支持多实例部署，实现消息监控、内容提取和远程管理。
+
+**主要功能**:
+- Linux 微信客户端的容器化运行
+- 实时屏幕监控和消息气泡检测
+- 精确内容提取（文本/图片/视频）
+- Redis Stream 消息队列管理
+- FastAPI RESTful API 和 SSE 流式输出
+- Web UI 管理界面
+- 多实例部署支持
+
+## 技术栈
+
+| 技术/框架 | 版本 | 用途 |
+|----------|------|------|
+| Python | 3.12+ | 主开发语言 |
+| FastAPI | 0.104+ | Web API 框架 |
+| OpenCV | 4.8+ | 图像处理和计算机视觉 |
+| Redis | 7.0+ | 消息队列和状态缓存 |
+| Docker | 20.0+ | 容器化部署 |
+| Ubuntu | 22.04 | 基础操作系统 |
+| Xvfb | - | 虚拟显示服务 |
+| Fluxbox | - | 窗口管理器 |
+| noVNC | - | Web 远程桌面 |
+| PyYAML | - | 配置文件解析 |
+
+## 系统架构
+
+### 整体架构图
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Docker Container: wechat_sandbox             │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │           Linux WeChat Client (GUI App)                   │  │
+│  │           - 运行在 Xvfb 虚拟显示器                         │  │
+│  │           - 通过 noVNC 远程访问                           │  │
+│  └───────────────────────┬───────────────────────────────────┘  │
+│                          │ 屏幕捕获                              │
+│  ┌───────────────────────▼───────────────────────────────────┐  │
+│  │         Producer1: Observer (屏幕观察者)                  │  │
+│  │         ┌───────────────────────────────────────────────┐  │  │
+│  │         │ VisualMonitor: 屏幕监控器                      │  │  │
+│  │         │ - 定位微信窗口                                 │  │  │
+│  │         │ - 定时截取屏幕                                 │  │  │
+│  │         │ - ROI 区域管理                                 │  │  │
+│  │         └───────────────────────────────────────────────┘  │  │
+│  │         ┌───────────────────────────────────────────────┐  │  │
+│  │         │ ChangeDetector: 变化检测器                    │  │  │
+│  │         │ - dHash 算法检测变化                          │  │  │
+│  │         │ - HSV 颜色空间识别气泡                         │  │  │
+│  │         │ - 轮廓检测和验证                               │  │  │
+│  │         └───────────────────────────────────────────────┘  │  │
+│  │         ┌───────────────────────────────────────────────┐  │  │
+│  │         │ MessageTypeClassifier: 消息分类器            │  │  │
+│  │         │ - 文本/图片/视频/链接分类                      │  │  │
+│  │         └───────────────────────────────────────────────┘  │  │
+│  └───────────────────────┬───────────────────────────────────┘  │
+│                          │ 新消息检测                             │
+│  ┌───────────────────────▼───────────────────────────────────┐  │
+│  │      Producer2: Content Fetcher (内容获取者)             │  │
+│  │      ┌─────────────────────────────────────────────────┐  │  │
+│  │      │ PrecisionContentFetcher: 精确内容提取器         │  │  │
+│  │      │ - 模拟鼠标点击气泡                               │  │  │
+│  │      │ - 双击复制文本内容                               │  │  │
+│  │      │ - 点击打开媒体查看器                             │  │  │
+│  │      │ - 截取高清图片                                   │  │  │
+│  │      └─────────────────────────────────────────────────┘  │  │
+│  └───────────────────────┬───────────────────────────────────┘  │
+│                          │ 结构化消息                             │
+│  ┌───────────────────────▼───────────────────────────────────┐  │
+│  │         Redis Queue Manager (队列管理器)                 │  │
+│  │         ┌───────────────────────────────────────────────┐  │  │
+│  │         │ stream_raw: 原始消息队列                       │  │  │
+│  │         │ - Producer1 入队                              │  │  │
+│  │         │ - Producer2 消费                              │  │  │
+│  │         └───────────────────────────────────────────────┘  │  │
+│  │         ┌───────────────────────────────────────────────┐  │  │
+│  │         │ stream_precise: 精确消息队列                  │  │  │
+│  │         │ - Producer2 入队                              │  │  │
+│  │         │ - 外部消费者消费                              │  │  │
+│  │         └───────────────────────────────────────────────┘  │  │
+│  └───────────────────────┬───────────────────────────────────┘  │
+│                          │ SSE/HTTP API                          │
+│  ┌───────────────────────▼───────────────────────────────────┐  │
+│  │         FastAPI Server (API 服务)                       │  │
+│  │         ┌───────────────────────────────────────────────┐  │  │
+│  │         │ REST API Endpoints                            │  │  │
+│  │         │ - GET /health 健康检查                        │  │  │
+│  │         │ - GET /status 状态查询                        │  │  │
+│  │         │ - POST /api/roi 更新 ROI                      │  │  │
+│  │         │ - GET /api/screenshot 截屏                    │  │  │
+│  │         │ - POST /api/restart 重启服务                  │  │  │
+│  │         └───────────────────────────────────────────────┘  │  │
+│  │         ┌───────────────────────────────────────────────┐  │  │
+│  │         │ SSE Streaming Endpoint                        │  │  │
+│  │         │ - GET /stream 消息流式输出                     │  │  │
+│  │         └───────────────────────────────────────────────┘  │  │
+│  │         ┌───────────────────────────────────────────────┐  │  │
+│  │         │ Web UI Management Interface                  │  │  │
+│  │         │ - GET /api/ui Web 管理界面                    │  │  │
+│  │         └───────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ 端口映射
+                              │ 6080 → noVNC
+                              │ 5900 → VNC
+                              │ 8000 → FastAPI
+                              │ 6379 → Redis
+                              ↓
+                    ┌─────────────────┐
+                    │  Docker Host    │
+                    └─────────────────┘
+```
+
+### 数据流图
+
+```
+┌──────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  WeChat  │────▶│  Producer1  │────▶│ stream_raw  │────▶│  Producer2  │
+│  Screen  │     │  Observer   │     │  (Redis)    │     │  Fetcher    │
+└──────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+                      │                                        │
+                      ▼                                        ▼
+                ┌─────────────┐                          ┌─────────────┐
+                │ stream_     │                          │ stream_     │
+                │ precise     │◀─────────────────────────│  (Redis)    │
+                │  (Redis)    │                          └─────────────┘
+                └─────────────┘                                  │
+                      │                                          │
+                      ▼                                          │
+                ┌─────────────┐                                  │
+                │   SSE       │                                  │
+                │   Stream    │                                  │
+                └─────────────┘                                  │
+                      │                                          │
+                      ▼                                          │
+                ┌─────────────┐                                  │
+                │MonitorAgent │◀─────────────────────────────────┘
+                └─────────────┘
+```
+
+## 核心组件说明
+
+### 1. Producer1: Observer (屏幕观察者)
+
+**文件**: `producer_service/producer1_observer.py`
+
+**职责**:
+- 持续监控屏幕变化
+- 检测新的消息气泡
+- 对消息类型进行初步分类
+- 将消息推送到原始队列
+
+**工作流程**:
+```
+1. 初始化监控器（VisualMonitor）
+2. 加载 ROI 配置
+3. 启动监控循环
+   - 定时截取屏幕
+   - 使用 ChangeDetector 检测变化
+   - 使用 MessageTypeClassifier 分类
+   - 将消息推送到 stream_raw
+```
+
+**关键类**:
+- `VisualMonitor`: 视觉监控器，负责窗口定位和屏幕截取
+- `ChangeDetector`: 变化检测器，使用 dHash 算法
+- `MessageTypeClassifier`: 消息分类器，基于图像特征分类
+
+### 2. Producer2: Content Fetcher (内容获取者)
+
+**文件**: `producer_service/producer2_content_fetcher.py`
+
+**职责**:
+- 从原始队列读取消息
+- 模拟鼠标点击获取精确内容
+- 提取文本或高清图片
+- 将结构化消息推送到精确队列
+
+**工作流程**:
+```
+1. 从 stream_raw 读取消息（消费者组模式）
+2. 根据消息类型获取精确内容
+   - 文本: 双击复制
+   - 图片/视频: 点击打开查看器，截取高清图
+3. 保存高清图片到本地
+4. 构造完整消息数据
+5. 推送到 stream_precise
+6. 确认消息处理完成
+```
+
+**关键类**:
+- `PrecisionContentFetcher`: 精确内容提取器，模拟用户操作
+
+### 3. Redis Queue Manager (队列管理器)
+
+**文件**: `producer_service/queue_manager.py`
+
+**职责**:
+- 管理 Redis Stream 消息队列
+- 提供生产者入队操作
+- 提供消费者读取操作
+- 管理消息去重和持久化
+
+**数据结构**:
+```
+stream_raw: wechat:messages:raw
+  Fields:
+    - id: 消息唯一ID
+    - timestamp: 时间戳
+    - type: 消息类型
+    - position: 气泡位置 {screen_x, screen_y}
+    - bubble_img_base64: 气泡图片（base64编码）
+    - metadata: 元数据
+
+stream_precise: wechat:messages:precise
+  Fields:
+    - id: 消息唯一ID
+    - timestamp: 时间戳
+    - type: 消息类型
+    - position: 气泡位置
+    - bubble_img_base64: 气泡图片
+    - precise_content: 精确内容 {type, text, media_path, media_image_base64}
+    - priority: 优先级
+    - metadata: 元数据
+```
+
+**消费者组**:
+- `producer2_group`: 消费 stream_raw
+- `external_consumers`: 消费 stream_precise
+
+### 4. API Server (API 服务)
+
+**文件**: `producer_service/api_server.py`
+
+**职责**:
+- 提供 RESTful API 端点
+- 实现 SSE 流式输出
+- 管理 Web UI 界面
+- 健康检查和状态查询
+
+**API 端点**:
+
+| 端点 | 方法 | 功能 |
+|------|------|------|
+| `/` | GET | 服务信息 |
+| `/health` | GET | 健康检查 |
+| `/status` | GET | 获取状态 |
+| `/api/config` | GET | 获取完整配置 |
+| `/api/config` | POST | 更新完整配置 |
+| `/api/roi` | GET | 获取当前 ROI 配置 |
+| `/api/roi` | POST | 更新 ROI 配置 |
+| `/api/screenshot` | GET | 获取当前屏幕截图（PNG） |
+| `/stream` | GET | SSE 消息流 |
+| `/api/restart` | POST | 重启服务 |
+
+**生命周期管理**:
+- 启动时: 初始化队列管理器、启动生产者线程
+- 运行时: 处理 API 请求、SSE 流式输出
+- 关闭时: 停止生产者线程、清理资源
+
+### 5. Web UI (Web 管理界面)
+
+**文件**: `static/index.html`
+
+**职责**:
+- 提供 noVNC 远程桌面访问
+- 显示服务状态
+- ROI 区域配置界面（热键交互）
+- 实时日志显示
+- 截屏预览功能
+
+**ROI 配置功能**:
+- **热键触发**: 按下 `Ctrl + F1` 打开 ROI 选择器
+- **鼠标拖拽**: 在截图上拖拽选择 ROI 区域
+- **多预设支持**: 支持发送区域（send_area）和接收区域（receive_area）
+- **实时预览**: 选择 ROI 时显示边框预览
+- **即时保存**: 配置更改立即保存到 config.yaml
+- **Docker 持久化**: Docker 重启后自动加载已保存的 ROI 配置
+
+**界面布局**:
+```
+┌─────────────────────────────────────────┐
+│           Header (标题)                 │
+├──────────────────┬──────────────────────┤
+│                  │  服务状态卡片         │
+│                  │  - Producer1 状态    │
+│   远程桌面       │  - Producer2 状态    │
+│   (noVNC)        │  - Redis 状态       │
+│                  │                      │
+│                  │  ROI 配置            │
+│                  │  - 热键提示 Ctrl+F1  │
+│                  │  - 多预设切换        │
+│                  │  - 实时预览          │
+│                  │                      │
+│                  │  实时日志            │
+│                  │  - 日志滚动显示      │
+│                  │                      │
+│                  │  重启服务按钮        │
+└──────────────────┴──────────────────────┘
+```
+
+## 配置说明
+
+### 环境变量
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `REDIS_HOST` | localhost | Redis 主机地址 |
+| `REDIS_PORT` | 6379 | Redis 端口 |
+| `REDIS_DB` | 0 | Redis 数据库编号 |
+| `REDIS_PASSWORD` | - | Redis 密码 |
+| `INSTANCE_ID` | default | 实例标识 |
+
+### 配置文件
+
+**config.yaml**:
+```yaml
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  password: null
+  stream_raw: wechat:messages:raw
+  stream_precise: wechat:messages:precise
+  max_length: 10000
+
+system:
+  instance_id: default
+  save_directory: ./data
+
+roi:
+  presets:
+    send_area:
+      name: 发送区域
+      description: 微信消息输入和发送区域
+      coordinates: [0, 0, 0, 0]
+      enabled: true
+    receive_area:
+      name: 接收区域
+      description: 群消息接收和显示区域
+      coordinates: [0, 0, 0, 0]
+      enabled: true
+  active_preset: receive_area
+```
+
+**ROI 配置说明**:
+- **多预设支持**: 支持多个 ROI 预设（如发送区域、接收区域）
+- **热键交互**: 通过 Web UI 按 `Ctrl + F1` 打开 ROI 选择器
+- **鼠标拖拽**: 在截图上拖拽选择 ROI 区域
+- **即时保存**: 配置更改立即保存到 config.yaml
+- **Docker 持久化**: Docker 重启后自动加载已保存的 ROI 配置
+- **实时预览**: 选择 ROI 时显示边框预览
+- **坐标格式**: [left, top, right, bottom] 像素坐标
+- **向后兼容**: 支持旧式 flat-list ROI 配置格式 [100, 200, 500, 800]
+
+## 端口映射
+
+### 单实例部署
+
+| 容器端口 | 主机端口 | 服务 |
+|----------|----------|------|
+| 6080 | 6080 | noVNC Web 界面 |
+| 5900 | 5900 | VNC 服务 |
+| 8000 | 8000 | FastAPI 服务 |
+| 6379 | 6379 | Redis |
+
+### 多实例部署
+
+| 实例 | FastAPI | noVNC | VNC |
+|------|---------|-------|-----|
+| 1 | 8001 | 6081 | 5901 |
+| 2 | 8002 | 6082 | 5902 |
+| 3 | 8003 | 6083 | 5903 |
+
+## 镜像构建与推送
+
+### 镜像构建依赖文件
+
+镜像构建依赖以下文件，位于 `build/` 目录：
+
+| 文件名 | 说明 |
+|--------|------|
+| `fonts-noto-cjk_20240730+repack1-1_all.deb` | Noto CJK 字体包，支持中文显示 |
+| `WeChatLinux_x86_64.deb` | Linux 微信客户端安装包 |
+
+### 本地构建镜像
+
+```bash
+# 进入项目目录
+cd services/wechat_sandbox
+
+# 构建镜像
+docker build -t wechat_sandbox:latest .
+
+# 或者指定镜像名称
+docker build -t ghcr.io/lsh255/wechat-sandbox:latest .
+```
+
+### 推送镜像到 GitHub Container Registry (ghcr.io)
+
+#### 1. 准备工作
+
+创建 GitHub 个人访问令牌（Personal Access Token）：
+1. 访问：https://github.com/settings/tokens
+2. 点击"Generate new token" → "Generate new token (classic)"
+3. 设置 Token 名称（如：ghcr-push）
+4. 勾选权限：
+   - ✅ `write:packages`（推送镜像）
+   - ✅ `read:packages`（拉取镜像）
+   - ✅ `delete:packages`（可选，删除镜像）
+5. 点击生成并复制令牌
+
+#### 2. 登录 ghcr.io
+
+```bash
+docker login ghcr.io
+# 输入用户名：GitHub 用户名（如：lsh255）
+# 输入密码：GitHub 个人访问令牌（不是 GitHub 密码）
+```
+
+#### 3. 打标签
+
+```bash
+# 本地镜像打标签
+docker tag wechat_sandbox:latest ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+#### 4. 推送镜像
+
+```bash
+docker push ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+#### 5. 验证推送
+
+```bash
+# 查看远程镜像信息
+docker pull ghcr.io/lsh255/wechat-sandbox:latest
+```
+
+### 使用远程镜像部署
+
+测试环境、生产单服务、生产多服务均可依赖 ghcr.io 上的远程镜像启动容器：
+
+**docker-compose.yml** 示例：
+
+```yaml
+version: '3.8'
+
+services:
+  wechat_sandbox:
+    image: ghcr.io/lsh255/wechat-sandbox:latest
+    container_name: wechat_sandbox
+    ports:
+      - "6080:6080"  # noVNC
+      - "5900:5900"  # VNC
+      - "8000:8000"  # FastAPI
+      - "6379:6379"  # Redis
+    restart: unless-stopped
+```
+
+**启动命令**：
+
+```bash
+docker-compose up -d
+```
+
+## 部署方式
+
+### 1. 开发环境（单实例）
+
+```bash
+docker-compose -f docker-compose.test.yml up -d --build
+```
+
+访问地址:
+- noVNC: http://localhost:6080
+- FastAPI: http://localhost:8000
+
+### 2. 生产环境（单实例）
+
+使用远程镜像（推荐）：
+```bash
+docker-compose -f docker-compose.yml up -d
+```
+
+或本地构建：
+```bash
+docker-compose -f docker-compose.yml up -d --build
+```
+
+### 3. 生产环境（多实例）
+
+使用远程镜像（推荐）：
+```bash
+docker-compose -f docker-compose.multi.yml up -d
+```
+
+或本地构建：
+```bash
+docker-compose -f docker-compose.multi.yml up -d --build
+```
+
+## 目录结构
+
+```
+wechat_sandbox/
+├── Dockerfile                 # 镜像构建文件
+├── Dockerfile.test            # 测试环境镜像构建文件
+├── docker-compose.yml         # 生产环境单实例配置
+├── docker-compose.test.yml    # 开发/测试环境配置
+├── docker-compose.multi.yml   # 生产环境多实例配置
+├── config.yaml                # 配置文件（ROI 多预设支持）
+├── CONTEXT.md                 # 技术上下文文档
+├── main.py                    # 主启动脚本
+├── start_wechat.sh            # 微信启动脚本
+├── build/                     # 镜像构建依赖文件
+│   ├── fonts-noto-cjk_20240730+repack1-1_all.deb
+│   └── WeChatLinux_x86_64.deb
+├── app/                       # FastAPI 应用
+│   └── main.py               # FastAPI 服务器（配置/ROI/截图 API）
+├── producer_service/           # 核心服务代码
+│   ├── __init__.py
+│   ├── monitor.py             # 视觉监控器（ROI 多预设加载）
+│   ├── detector.py            # 变化检测器
+│   ├── classifier.py          # 消息分类器
+│   ├── extractor.py           # 精确内容提取器
+│   ├── producer1_observer.py # 生产者1
+│   ├── producer2_content_fetcher.py # 生产者2
+│   └── queue_manager.py       # 队列管理器
+├── static/                    # 静态资源
+│   └── index.html             # Web UI 管理界面（ROI 热键交互）
+├── utils/                     # 工具模块
+│   └── config.py              # 配置工具类
+└── data/                      # 数据存储目录
+    ├── images/                # 媒体图片存储
+    └── logs/                  # 日志文件存储
+```
+
+### build/ 目录说明
+
+`build/` 目录用于存放 Docker 镜像构建所需的依赖文件，这些文件会在镜像构建过程中被复制到容器内并安装：
+
+**文件列表**：
+- `fonts-noto-cjk_20240730+repack1-1_all.deb`：Noto CJK 字体包，确保微信中文显示正常
+- `WeChatLinux_x86_64.deb`：Linux 版微信客户端安装包
+
+**注意事项**：
+- 这些文件较大（总大小约 300MB），镜像构建完成后可以删除，因为已打包到镜像中
+- 如需重新构建镜像，需要保留这些文件
+- 推荐使用 ghcr.io 上的远程镜像，避免重复本地构建
+
+## 开发规范
+
+### 代码组织
+
+```
+producer_service/
+├── __init__.py
+├── api_server.py              # FastAPI 服务器
+├── monitor.py                 # 视觉监控器
+├── detector.py                # 变化检测器
+├── classifier.py              # 消息分类器
+├── extractor.py               # 精确内容提取器
+├── producer1_observer.py      # 生产者1
+├── producer2_content_fetcher.py  # 生产者2
+├── queue_manager.py           # 队列管理器
+└── main.py                    # 主入口
+```
+
+### 日志规范
+
+**日志级别**:
+- `ERROR`: 功能异常、需要人工介入
+- `WARN`: 潜在问题、但程序可继续
+- `INFO`: 关键业务节点
+- `DEBUG`: 调试信息
+
+**必须添加日志的位置**:
+- try-catch 的 catch 块
+- 外部调用前后
+- 业务入口
+- 状态变更
+
+**日志格式**:
+```python
+logger.info("消息描述", {key1: value1, key2: value2})
+logger.error("错误描述", {error: exception_obj, context: {...}})
+```
+
+### 异常处理
+
+```python
+try:
+    # 可能失败的操作
+    pass
+except Exception as e:
+    logger.error("操作失败", {error: e, context: {...}})
+    # 根据业务需要决定是否继续或抛出
+```
+
+### 线程安全
+
+使用 `threading.Lock` 保护共享资源:
+
+```python
+import threading
+
+class Example:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.shared_data = None
+    
+    def update_data(self, data):
+        with self.lock:
+            self.shared_data = data
+```
+
+## 测试规范
+
+### 测试类型
+
+**单元测试** (`tests/test_producer_service.py`):
+- 测试单个组件功能
+- 使用 Mock 隔离外部依赖
+
+**API 测试** (`tests/test_api_server.py`):
+- 测试所有 API 端点
+- 验证请求/响应格式
+
+**集成测试** (`tests/test_integration.py`):
+- 测试完整工作流
+- 验证组件协作
+
+### 运行测试
+
+```bash
+# 运行所有测试
+python run_tests.py all
+
+# 运行单元测试
+python run_tests.py unit
+
+# 运行 API 测试
+python run_tests.py api
+
+# 运行集成测试
+python run_tests.py integration
+
+# 生成覆盖率报告
+pytest tests/ --cov=. --cov-report=html
+```
+
+## 故障排查
+
+### 常见问题
+
+**1. 容器无法启动**
+- 检查 Docker 日志: `docker-compose logs`
+- 检查端口是否被占用: `netstat -ano | findstr "6080"`
+- 检查镜像构建是否成功
+
+**2. 微信窗口无法定位**
+- 检查 xdotool 是否正常工作
+- 检查微信窗口名称是否匹配
+- 查看 monitor.py 日志
+
+**3. 消息检测不准确**
+- 调整 ChangeDetector 的阈值参数
+- 检查 ROI 区域配置是否正确
+- 查看 HSV 颜色范围是否匹配
+
+**4. Redis 连接失败**
+- 检查 Redis 服务是否运行
+- 检查 Redis 连接配置
+- 查看 queue_manager.py 日志
+
+## 性能优化
+
+### 监控频率
+
+根据实际需求调整监控间隔:
+- 高频监控: `interval = 0.1` (100ms)
+- 标准监控: `interval = 0.2` (200ms)
+- 低频监控: `interval = 0.5` (500ms)
+
+### ROI 优化
+
+- 尽量缩小 ROI 区域，减少不必要的屏幕截取
+- 避免包含动态内容区域（如时间显示）
+
+### Redis 优化
+
+- 设置合理的 `max_length` 限制内存占用
+- 定期清理过期的消息
+
+## 安全说明
+
+### 访问控制
+
+- VNC 默认密码: `wechat123`，生产环境请修改
+- 建议使用防火墙限制端口访问
+- 不要将服务暴露到公网
+
+### 敏感信息
+
+- 禁止在代码中硬编码密码和密钥
+- 使用环境变量或配置文件存储敏感信息
+
+## 相关文档
+
+- [README.md](./README.md) - 项目快速开始
+- [WECHAT_SANDBOX.md](./WECHAT_SANDBOX.md) - 微信沙箱使用说明
+- [QUICKSTART.md](./QUICKSTART.md) - 快速开始指南
+- [../../CLAUDE.md](../../CLAUDE.md) - 项目整体记忆文档
+
+## 更新日志
+
+### v1.0.0 (2026-01-10)
+- 初始版本发布
+- 实现基础的消息监控和提取功能
+- 支持 FastAPI 和 SSE 流式输出
+- 支持 Web UI 管理界面
+- 支持多实例部署

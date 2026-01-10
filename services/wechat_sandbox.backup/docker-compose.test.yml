@@ -1,0 +1,53 @@
+version: '3.8'  # Docker Compose 文件版本
+
+services:
+  redis:  # Redis 服务
+    image: redis:7-alpine  # 使用 Redis 7 Alpine 镜像
+    container_name: wechat_redis_test  # 容器名称
+    ports:  # 端口映射
+      - "6379:6379"  # 将主机的 6379 端口映射到容器的 6379 端口
+    volumes:  # 数据卷挂载
+      - redis_data:/data  # 将 redis_data 卷挂载到容器的 /data 目录
+    command: redis-server --appendonly yes  # 启动 Redis 并启用 AOF 持久化
+    healthcheck:  # 健康检查配置
+      test: ["CMD", "redis-cli", "ping"]  # 执行 redis-cli ping 命令检查服务健康状态
+      interval: 5s  # 每 5 秒检查一次
+      timeout: 3s  # 超时时间为 3 秒
+      retries: 5  # 失败后重试 5 次
+
+  wechat_sandbox:  # 微信沙箱服务
+    build:  # 构建配置
+      context: .  # 构建上下文为当前目录
+      dockerfile: Dockerfile.test  # 使用 Dockerfile.test 作为构建文件
+      args:  # 构建参数
+        BASE_IMAGE: wechat_sandbox:latest  # 基础镜像名称
+    image: wechat_sandbox-test:latest  # 构建后的镜像名称和标签
+    container_name: wechat_sandbox_test  # 容器名称
+    ports:  # 端口映射
+      - "8000:8000"  # FastAPI 服务端口
+      - "6080:6080"  # noVNC Web 界面端口
+      - "5900:5900"  # VNC 服务端口
+    environment:  # 环境变量
+      - DISPLAY=:99  # 设置虚拟显示器编号
+      - REDIS_HOST=redis  # Redis 主机地址
+      - REDIS_PORT=6379  # Redis 端口
+      - REDIS_DB=0  # Redis 数据库编号
+      - VNC_PASSWORD=wechat123  # VNC 密码
+    depends_on:  # 服务依赖
+      redis:  # 依赖 Redis 服务
+        condition: service_healthy  # 等待 Redis 健康检查通过后再启动
+    volumes:  # 数据卷挂载
+      - ./media:/app/media  # 将主机的 ./media 目录挂载到容器的 /app/media 目录
+      - ./logs:/app/logs  # 将主机的 ./logs 目录挂载到容器的 /app/logs 目录
+      - wechat_data:/root/.wechat  # 将 wechat_data 卷挂载到容器的 /root/.wechat 目录（微信数据）
+    privileged: true  # 赋予容器特权模式
+    cap_add:  # 添加 Linux 能力
+      - SYS_ADMIN  # 添加系统管理员能力
+      - NET_ADMIN  # 添加网络管理能力
+    restart: unless-stopped  # 容器退出策略：除非手动停止，否则自动重启
+    stdin_open: true  # 保持标准输入打开（-i）
+    tty: true  # 分配伪终端（-t）
+
+volumes:  # 数据卷定义
+  wechat_data:  # 微信数据卷
+  redis_data:  # Redis 数据卷
