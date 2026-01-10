@@ -256,10 +256,12 @@ stream_precise: wechat:messages:precise
 | `/` | GET | 服务信息 |
 | `/health` | GET | 健康检查 |
 | `/status` | GET | 获取状态 |
-| `/api/screenshot` | GET | 截取屏幕 |
-| `/api/roi` | POST | 更新 ROI |
+| `/api/config` | GET | 获取完整配置 |
+| `/api/config` | POST | 更新完整配置 |
+| `/api/roi` | GET | 获取当前 ROI 配置 |
+| `/api/roi` | POST | 更新 ROI 配置 |
+| `/api/screenshot` | GET | 获取当前屏幕截图（PNG） |
 | `/stream` | GET | SSE 消息流 |
-| `/api/ui` | GET | Web 管理界面 |
 | `/api/restart` | POST | 重启服务 |
 
 **生命周期管理**:
@@ -274,9 +276,17 @@ stream_precise: wechat:messages:precise
 **职责**:
 - 提供 noVNC 远程桌面访问
 - 显示服务状态
-- ROI 区域配置界面
+- ROI 区域配置界面（热键交互）
 - 实时日志显示
 - 截屏预览功能
+
+**ROI 配置功能**:
+- **热键触发**: 按下 `Ctrl + F1` 打开 ROI 选择器
+- **鼠标拖拽**: 在截图上拖拽选择 ROI 区域
+- **多预设支持**: 支持发送区域（send_area）和接收区域（receive_area）
+- **实时预览**: 选择 ROI 时显示边框预览
+- **即时保存**: 配置更改立即保存到 config.yaml
+- **Docker 持久化**: Docker 重启后自动加载已保存的 ROI 配置
 
 **界面布局**:
 ```
@@ -289,8 +299,9 @@ stream_precise: wechat:messages:precise
 │   (noVNC)        │  - Redis 状态       │
 │                  │                      │
 │                  │  ROI 配置            │
-│                  │  - 坐标输入          │
-│                  │  - 更新按钮          │
+│                  │  - 热键提示 Ctrl+F1  │
+│                  │  - 多预设切换        │
+│                  │  - 实时预览          │
 │                  │                      │
 │                  │  实时日志            │
 │                  │  - 日志滚动显示      │
@@ -328,8 +339,30 @@ system:
   instance_id: default
   save_directory: ./data
 
-roi: [100, 200, 500, 800]  # left, top, right, bottom
+roi:
+  presets:
+    send_area:
+      name: 发送区域
+      description: 微信消息输入和发送区域
+      coordinates: [0, 0, 0, 0]
+      enabled: true
+    receive_area:
+      name: 接收区域
+      description: 群消息接收和显示区域
+      coordinates: [0, 0, 0, 0]
+      enabled: true
+  active_preset: receive_area
 ```
+
+**ROI 配置说明**:
+- **多预设支持**: 支持多个 ROI 预设（如发送区域、接收区域）
+- **热键交互**: 通过 Web UI 按 `Ctrl + F1` 打开 ROI 选择器
+- **鼠标拖拽**: 在截图上拖拽选择 ROI 区域
+- **即时保存**: 配置更改立即保存到 config.yaml
+- **Docker 持久化**: Docker 重启后自动加载已保存的 ROI 配置
+- **实时预览**: 选择 ROI 时显示边框预览
+- **坐标格式**: [left, top, right, bottom] 像素坐标
+- **向后兼容**: 支持旧式 flat-list ROI 配置格式 [100, 200, 500, 800]
 
 ## 端口映射
 
@@ -488,24 +521,28 @@ wechat_sandbox/
 ├── docker-compose.yml         # 生产环境单实例配置
 ├── docker-compose.test.yml    # 开发/测试环境配置
 ├── docker-compose.multi.yml   # 生产环境多实例配置
-├── config.yaml                # 配置文件
+├── config.yaml                # 配置文件（ROI 多预设支持）
 ├── CONTEXT.md                 # 技术上下文文档
+├── main.py                    # 主启动脚本
+├── start_wechat.sh            # 微信启动脚本
 ├── build/                     # 镜像构建依赖文件
 │   ├── fonts-noto-cjk_20240730+repack1-1_all.deb
 │   └── WeChatLinux_x86_64.deb
+├── app/                       # FastAPI 应用
+│   └── main.py               # FastAPI 服务器（配置/ROI/截图 API）
 ├── producer_service/           # 核心服务代码
 │   ├── __init__.py
-│   ├── api_server.py          # FastAPI 服务器
-│   ├── monitor.py             # 视觉监控器
+│   ├── monitor.py             # 视觉监控器（ROI 多预设加载）
 │   ├── detector.py            # 变化检测器
 │   ├── classifier.py          # 消息分类器
 │   ├── extractor.py           # 精确内容提取器
 │   ├── producer1_observer.py # 生产者1
 │   ├── producer2_content_fetcher.py # 生产者2
-│   ├── queue_manager.py       # 队列管理器
-│   └── main.py                # 主入口
+│   └── queue_manager.py       # 队列管理器
 ├── static/                    # 静态资源
-│   └── index.html             # Web UI 管理界面
+│   └── index.html             # Web UI 管理界面（ROI 热键交互）
+├── utils/                     # 工具模块
+│   └── config.py              # 配置工具类
 └── data/                      # 数据存储目录
     ├── images/                # 媒体图片存储
     └── logs/                  # 日志文件存储

@@ -65,7 +65,13 @@ class VisualMonitor:
 
         配置文件路径: ../config.yaml
         配置格式:
-            roi: [left, top, right, bottom]
+            roi:
+              presets:
+                send_area:
+                  coordinates: [left, top, right, bottom]
+                receive_area:
+                  coordinates: [left, top, right, bottom]
+              active_preset: receive_area
         """
         try:
             import yaml
@@ -74,8 +80,19 @@ class VisualMonitor:
                 with open(config_file, 'r', encoding='utf-8') as f:
                     cfg = yaml.safe_load(f)
                     if cfg and 'roi' in cfg:
-                        self.roi = tuple(cfg['roi'])
-                        logger.info(f"已加载 ROI: {self.roi}")
+                        roi_config = cfg['roi']
+                        
+                        # 支持新格式：multi-preset
+                        if isinstance(roi_config, dict) and 'presets' in roi_config:
+                            active_preset = roi_config.get('active_preset', 'receive_area')
+                            if active_preset in roi_config['presets']:
+                                coordinates = roi_config['presets'][active_preset]['coordinates']
+                                self.roi = tuple(coordinates)
+                                logger.info(f"已加载 ROI (预设: {active_preset}): {self.roi}")
+                        # 兼容旧格式：flat list
+                        elif isinstance(roi_config, list) and len(roi_config) == 4:
+                            self.roi = tuple(roi_config)
+                            logger.info(f"已加载 ROI (旧格式): {self.roi}")
         except Exception as e:
             logger.warning(f"加载 ROI 配置失败: {e}")
 

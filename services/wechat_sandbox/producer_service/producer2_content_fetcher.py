@@ -70,7 +70,7 @@ class Producer2ContentFetcher:
         
         try:
             image.save(filepath, 'PNG')
-            logger.debug(f"Saved high-res image: {filepath}")
+            logger.info(f"Saved high-res image: {filepath}")
             return filepath
         except Exception as e:
             logger.error(f"Failed to save image {filepath}: {e}")

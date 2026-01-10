@@ -28,13 +28,17 @@
 | 组件 | 具体技术/库 | 版本/说明 | 用途与影响 |
 |------|------------|----------|----------|
 | 大模型服务 | Ollama | 最新版 | 本地部署和运行 Qwen3-VL (视觉语言模型) 和 Qwen3-Embedding-4B (嵌入模型)。 |
-| 视觉模型 | Qwen3-VL-8B | via Ollama | 用于理解微信截图中的图文混合内容，支持OCR、场景理解、任务识别。 |
+| 意图识别模型 | Qwen3-72B / Qwen3-8B | via Ollama | 用于识别用户消息意图（任务配置、群聊监控指令、其他操作）。 |
+| 视觉模型 | Qwen3-VL-8B | via Ollama | 用于理解微信截图中的图文混合内容，支持OCR、场景理解、任务识别、区域定位。 |
 | 嵌入模型 | Qwen3-Embedding-4B | via Ollama | 将业务知识库文本转换为向量，存入Chroma用于RAG检索。 |
 | 向量数据库 | ChromaDB | 0.4.18+ | 轻量级、嵌入式向量数据库，与LangChain生态集成度极高，支持持久化存储。 |
 | 多模态处理 | PIL / OpenCV | 最新版 | 图像预处理，为Qwen3-VL模型准备截图数据。 |
 | 屏幕检测 | OpenCV-Python | 4.8+ | 实现dHash算法和HSV颜色空间检测，用于识别屏幕变化和气泡。 |
 | 消息分类 | numpy + PyTorch | 最新版 | 用于MessageTypeClassifier的图像特征提取和分类。 |
 | RAG检索链 | LangChain Expression Language (LCEL) | - | 用于流畅地组合检索、上下文构建、提示、模型调用等步骤，构建高效的RAG流程。 |
+| 意图识别 | LangChain Runnable | - | 构建用户消息意图识别链，解析任务配置和群聊监控指令。 |
+| 视觉定位 | LangChain Runnable | - | 构建微信界面区域定位链，识别目标群聊、消息发送/接收区域。 |
+| Agent决策 | LangGraph Agent Node | - | 核心决策节点，根据消息内容自主决定后续操作（写日报、更新台账、保存消息等）。 |
 
 ### 2.3 微信沙盒与自动化
 
@@ -64,13 +68,45 @@
 
 ### 2.5 Web UI 与用户交互
 
+#### 2.5.1 对话式Web UI（面向用户）
+
 | 组件 | 具体技术/库 | 版本 | 用途说明 |
 |------|------------|----------|----------|
-| 前端框架 | 原生JavaScript | ES6+ | 实现Web UI界面，无需额外框架依赖。 |
-| VNC集成 | noVNC | 最新版 | 在浏览器中嵌入VNC客户端，远程访问微信界面。 |
-| 实时通信 | Server-Sent Events (SSE) | - | 从生产者服务实时推送消息到Web UI。 |
-| ROI配置 | Canvas API | - | 在预览图像上拖拽选择监控区域。 |
-| 状态监控 | Fetch API | - | 定期轮询服务状态和队列长度。 |
+| 前端框架 | React | 18.3+ | 构建对话式Web UI界面，提供简洁的用户交互体验。 |
+| 构建工具 | Vite | 5.4+ | 快速开发和构建React应用。 |
+| 语言 | TypeScript | 5.5+ | 类型安全的前端开发。 |
+| 路由 | React Router | 6.26+ | 单页应用路由管理（对话页面、404页面）。 |
+| 状态管理 | Zustand | 4.5+ | 轻量级状态管理，管理对话消息、任务状态。 |
+| UI组件库 | shadcn/ui | latest | 基于Radix UI的高质量组件库，快速构建美观界面。 |
+| 样式方案 | Tailwind CSS | 3.4+ | 实用优先的CSS框架，快速样式开发。 |
+| 实时通信 | WebSocket | - | 与Orchestrator后端建立WebSocket连接，实现流式对话交互。 |
+| HTTP客户端 | Axios / Fetch | - | 发送HTTP请求到Orchestrator和沙盒API。 |
+| 消息渲染 | react-markdown | 9.0+ | 渲染AI返回的Markdown格式消息。 |
+| 图标库 | lucide-react | latest | 美观的图标组件。 |
+
+#### 2.5.2 系统管理界面（面向管理员）
+
+| 组件 | 具体技术/库 | 版本 | 用途说明 |
+|------|------------|----------|----------|
+| 仪表盘 | React + shadcn/ui | - | 显示系统概览、沙盒状态、Agent状态、工作流状态。 |
+| 沙盒监控 | React + WebSocket | - | 实时监控微信沙盒运行状态、资源使用情况。 |
+| Agent监控 | React + WebSocket | - | 实时监控AI Agent决策过程、工作流执行状态。 |
+| 工作流监控 | React + Recharts | - | 可视化展示LangGraph工作流执行路径、节点状态。 |
+| 实例列表 | React Table | - | 管理多实例沙盒，支持启动、停止、重启操作。 |
+| 系统指标 | Recharts | 2.12+ | 图表展示CPU、内存、网络、磁盘使用情况。 |
+| 日志查看 | React + VirtualList | - | 实时查看系统日志、工作流日志，支持过滤和搜索。 |
+| VNC集成 | noVNC | 最新版 | 在管理界面中嵌入VNC客户端，远程访问微信沙盒。 |
+| 实时更新 | WebSocket | - | 推送式实时更新，无需轮询。 |
+
+#### 2.5.3 通信协议
+
+| 组件 | 具体技术/库 | 版本 | 用途说明 |
+|------|------------|----------|----------|
+| 意图反馈 | WebSocket | - | 接收AI对用户消息的意图识别结果，确认任务配置和群聊监控设置。 |
+| 沙盒登录引导 | WebSocket | - | 当需要用户登录微信时，引导用户打开VNC界面进行扫码登录。 |
+| 消息历史 | localStorage | - | 本地存储用户对话历史记录。 |
+| 状态监控 | WebSocket | - | 实时推送服务状态、任务列表、监控群聊列表、Agent决策状态。 |
+| 状态显示 | React State | - | 实时显示当前监控的群聊、任务列表、日报生成状态、Agent决策结果。 |
 
 ### 2.6 可观测性与运维
 
@@ -102,15 +138,19 @@ wechat-workflow-ai-agent/
 │   │   ├── __init__.py
 │   │   ├── main_workflow.py            # 主协调工作流
 │   │   └── nodes/                      # 工作流节点
-│   │       ├── monitor_node.py         # 监控节点
-│   │       ├── multimodal_node.py      # 多模态分析节点
-│   │       ├── state_tracker_node.py  # 状态跟踪节点
-│   │       └── document_node.py        # 文档生成节点
+│   │       ├── intent_recognition_node.py      # LLM意图识别节点
+│   │       ├── sandbox_launcher_node.py        # 沙盒启动器节点
+│   │       ├── visual_locator_node.py          # LLM视觉定位节点
+│   │       ├── monitor_node.py                  # 监控节点
+│   │       ├── multimodal_node.py               # 多模态分析节点
+│   │       ├── agent_decision_node.py           # Agent核心决策节点
+│   │       ├── document_executor_node.py        # 文档执行节点
+│   │       └── exceptions.py                    # 自定义异常
 │   └── exceptions.py                   # 自定义异常
 ├── services/
 │   ├── orchestrator/                   # 协调中心FastAPI应用
 │   │   ├── main.py
-│   │   └── static/
+│   │   └── api/                        # API路由
 │   └── wechat_sandbox/                 # 微信沙盒
 │       ├── Dockerfile
 │       ├── build/                      # 镜像构建依赖文件目录
@@ -125,11 +165,66 @@ wechat-workflow-ai-agent/
 │       ├── utils/                      # 工具模块
 │       │   ├── classifier.py           # 消息类型分类器
 │       │   └── detector.py             # 屏幕变化检测器
-│       ├── static/                     # Web UI 静态文件
-│       │   └── index.html              # Web UI 界面
 │       └── tests/                     # 测试文件
 │           ├── test_queue_manager.py
 │           └── test_producer_service.py
+├── frontend/                           # React前端应用
+│   ├── package.json                    # 依赖管理
+│   ├── tsconfig.json                   # TypeScript配置
+│   ├── vite.config.ts                  # Vite构建配置
+│   ├── index.html                      # HTML入口
+│   ├── src/
+│   │   ├── main.tsx                    # 应用入口
+│   │   ├── App.tsx                     # 根组件
+│   │   ├── assets/                     # 静态资源
+│   │   │   ├── styles/
+│   │   │   └── images/
+│   │   ├── router/                     # 路由配置
+│   │   ├── layouts/                    # 布局组件
+│   │   │   ├── MainLayout.tsx
+│   │   │   └── AdminLayout.tsx
+│   │   ├── pages/                      # 页面组件
+│   │   │   ├── chat/                   # 对话式Web UI（面向用户）
+│   │   │   │   ├── ChatPage.tsx
+│   │   │   │   ├── components/
+│   │   │   │   │   ├── ChatContainer.tsx
+│   │   │   │   │   ├── MessageList.tsx
+│   │   │   │   │   ├── MessageInput.tsx
+│   │   │   │   │   ├── TaskStatusCard.tsx
+│   │   │   │   │   └── AgentDecisionDisplay.tsx
+│   │   │   │   └── hooks/
+│   │   │   │       ├── useWebSocket.ts
+│   │   │   │       └── useChatMessages.ts
+│   │   │   ├── admin/                  # 系统管理界面（面向管理员）
+│   │   │   │   ├── AdminPage.tsx
+│   │   │   │   ├── components/
+│   │   │   │   │   ├── Dashboard.tsx
+│   │   │   │   │   ├── SandboxMonitor.tsx
+│   │   │   │   │   ├── AgentMonitor.tsx
+│   │   │   │   │   ├── WorkflowMonitor.tsx
+│   │   │   │   │   ├── InstanceList.tsx
+│   │   │   │   │   ├── SystemMetrics.tsx
+│   │   │   │   │   └── LogViewer.tsx
+│   │   │   │   └── hooks/
+│   │   │   │       ├── useSandboxStatus.ts
+│   │   │   │       ├── useAgentStatus.ts
+│   │   │   │       └── useSystemMetrics.ts
+│   │   │   └── NotFound.tsx
+│   │   ├── components/                 # 共享组件
+│   │   │   ├── common/
+│   │   │   └── charts/
+│   │   ├── services/                   # API服务
+│   │   │   ├── api.ts
+│   │   │   ├── orchestrator.ts
+│   │   │   ├── sandbox.ts
+│   │   │   └── workflow.ts
+│   │   ├── types/                      # TypeScript类型定义
+│   │   ├── store/                      # 状态管理
+│   │   ├── utils/                      # 工具函数
+│   │   └── constants/                  # 常量
+│   ├── public/                        # 公共静态文件
+│   ├── Dockerfile                      # 前端Docker镜像
+│   └── nginx.conf                      # Nginx配置（生产环境）
 ├── agents/                             # 对外服务或重型独立Agent
 │   ├── monitor_agent.py                # 管理沙盒，将数据触发至工作流
 │   └── __init__.py
@@ -137,6 +232,15 @@ wechat-workflow-ai-agent/
 │   ├── vector_store.py                 # Chroma向量库封装
 │   ├── embeddings.py                   # Qwen3-Embedding封装
 │   └── docs/                           # 存放知识库源文件
+├── intent_recognition/                 # LLM意图识别模块
+│   ├── chains.py                       # 意图识别链
+│   └── prompts.py                      # 意图识别提示词
+├── visual_locator/                     # LLM视觉定位模块
+│   ├── chains.py                       # 视觉定位链
+│   └── prompts.py                      # 视觉定位提示词
+├── agent_decision/                     # Agent决策模块
+│   ├── chains.py                       # Agent决策链
+│   └── prompts.py                      # Agent决策提示词
 ├── tools/                              # LangGraph工具定义
 │   ├── excel_tool.py                   # 更新Excel工具
 │   ├── word_tool.py                    # 生成报告工具
@@ -172,8 +276,36 @@ langgraph:
 ai:
   ollama:
     base_url: "http://localhost:11434"
-    vision_model: "qwen3-vl-8b:latest"        # 多模态模型
+    vision_model: "qwen3-vl-8b:latest"        # 多模态模型（视觉理解、区域定位）
     embedding_model: "qwen3-embedding-4b"    # 嵌入模型
+    intent_model: "qwen3-72b:latest"          # 意图识别模型
+    decision_model: "qwen3-72b:latest"        # Agent决策模型
+  chat_model: "qwen3-72b:latest"              # 对话模型（用于用户交互）
+
+# LLM意图识别配置
+intent_recognition:
+  enabled: true
+  temperature: 0.1                            # 低温度保证意图识别准确性
+  max_tokens: 100                            # 限制输出长度
+  confidence_threshold: 0.8                  # 置信度阈值
+
+# LLM视觉定位配置
+visual_locator:
+  enabled: true
+  temperature: 0.1                            # 低温度保证定位准确性
+  max_tokens: 200                            # 限制输出长度
+  confidence_threshold: 0.7                  # 置信度阈值
+
+# Agent决策配置
+agent_decision:
+  enabled: true
+  temperature: 0.3                            # 适中温度平衡创造性和准确性
+  max_tokens: 300                            # 限制输出长度
+  action_types:                               # 支持的操作类型
+    - "write_report"                          # 写日报
+    - "update_ledger"                         # 更新台账
+    - "save_message"                          # 保存消息
+    - "continue"                              # 继续监控
 
 # 向量数据库与知识库配置
 vector_store:
@@ -181,17 +313,29 @@ vector_store:
   persist_directory: "./data/chroma_db"      # Chroma持久化路径
   collection_name: "work_knowledge_base"
 
+# 用户管理配置（阶段三启用）
+user_management:
+  enabled: false
+  secret_key: "${JWT_SECRET_KEY}"             # JWT密钥
+  token_expire_hours: 24                      # Token过期时间
+
+# 任务配置
+tasks:
+  storage_backend: "redis"                    # 任务存储后端：redis/memory
+  redis_key_prefix: "tasks:"                  # 任务Redis键前缀
+
+# 监控群聊配置
+monitored_groups:
+  storage_backend: "redis"                    # 监控群聊存储后端
+  redis_key_prefix: "monitored_groups:"      # 监控群聊Redis键前缀
+  default_groups: []                           # 默认监控的群聊列表
+
 # 微信沙盒配置
 wechat_sandbox:
   docker_image: "wechat-sandbox:latest"
   producer_service_url: "http://localhost:8000"
   data_volume: "./data/wechat_profile"
   vnc_password: "vnc123"                      # VNC密码
-  roi_config:                                  # ROI监控区域配置
-    x: 100
-    y: 200
-    width: 300
-    height: 400
 
 # 多实例配置（生产环境）
 multi_instance:
@@ -201,14 +345,17 @@ multi_instance:
       api_port: 8001
       novnc_port: 6081
       vnc_port: 5901
+      user_id: null                           # 阶段三：绑定用户ID
     - id: 2
       api_port: 8002
       novnc_port: 6082
       vnc_port: 5902
+      user_id: null
     - id: 3
       api_port: 8003
       novnc_port: 6083
       vnc_port: 5903
+      user_id: null
 
 # 文档与工具配置
 tools:
@@ -234,6 +381,12 @@ screen_detection:
 message_classification:
   model_type: "simple"                        # 分类模型类型
   confidence_threshold: 0.8                  # 置信度阈值
+
+# 对话式Web UI配置
+chat_ui:
+  max_history_messages: 50                     # 最大历史消息数
+  stream_response: true                       # 是否启用流式响应
+  typing_simulation: true                      # 是否模拟打字效果
 ```
 
 ## 5. 核心组件初始化代码示例
@@ -265,19 +418,25 @@ def get_vector_store():
 
 ```python
 # core/state.py
-from typing import TypedDict, Annotated, List, Optional
+from typing import TypedDict, Annotated, List, Optional, Literal
 from langgraph.graph.message import add_messages
 import operator
 
 class AgentState(TypedDict):
     """LangGraph工作流的状态定义，贯穿整个处理流程。"""
     # 输入
-    raw_message: Optional[dict]  # 来自微信的原始消息
+    user_message: Optional[str]               # 用户输入消息
+    raw_message: Optional[dict]                # 来自微信的原始消息
     # 处理中间状态
-    multimodal_analysis: Optional[dict]  # 多模态分析结果
-    task_status: Optional[str]           # 任务状态（如 "waiting_mid")
+    intent: Optional[Literal["task_config", "monitor_group", "other"]]  # 用户意图
+    task_config: Optional[dict]                # 任务配置解析结果
+    group_name: Optional[str]                  # 目标群聊名称
+    visual_regions: Optional[dict]             # 视觉定位结果（目标群聊、消息发送/接收区域）
+    multimodal_analysis: Optional[dict]        # 多模态分析结果
+    action_type: Optional[Literal["write_report", "update_ledger", "save_message", "continue"]]  # Agent决策的操作类型
+    task_status: Optional[str]                 # 任务状态
     # 输出
-    document_updates: List[dict]         # 需要执行的文档更新指令
+    document_updates: List[dict]              # 需要执行的文档更新指令
     # 用于串联对话的消息记录
     messages: Annotated[list, add_messages]
 ```
@@ -289,39 +448,168 @@ class AgentState(TypedDict):
 from langgraph.graph import StateGraph, END
 from .state import AgentState
 from .nodes import (
-    monitor_node, 
-    multimodal_node, 
-    state_tracker_node, 
-    document_node
+    intent_recognition_node,
+    sandbox_launcher_node,
+    visual_locator_node,
+    monitor_node,
+    multimodal_node,
+    agent_decision_node,
+    document_executor_node
 )
 
 def create_workflow():
     """创建并编译主处理工作流"""
     workflow = StateGraph(AgentState)
     
-    # 添加节点（对应原Agent的核心功能）
+    # 添加节点（对应AI Agent核心功能）
+    workflow.add_node("intent_recognition", intent_recognition_node.process)
+    workflow.add_node("sandbox_launcher", sandbox_launcher_node.launch)
+    workflow.add_node("visual_locator", visual_locator_node.locate)
     workflow.add_node("monitor", monitor_node.process)
     workflow.add_node("multimodal", multimodal_node.analyze)
-    workflow.add_node("state_tracker", state_tracker_node.update)
-    workflow.add_node("document", document_node.execute)
+    workflow.add_node("agent_decision", agent_decision_node.decide)
+    workflow.add_node("document_executor", document_executor_node.execute)
     
     # 设置边（定义流程逻辑）
-    workflow.set_entry_point("monitor")
-    workflow.add_edge("monitor", "multimodal")
-    workflow.add_edge("multimodal", "state_tracker")
+    workflow.set_entry_point("intent_recognition")
     
-    # 状态节点决定下一步：若任务完成则生成文档，否则等待
+    # 意图识别后的条件路由
     workflow.add_conditional_edges(
-        "state_tracker",
-        state_tracker_node.should_generate_document,
-        {"yes": "document", "no": END}
+        "intent_recognition",
+        lambda state: "task_config" if state.get("intent") == "task_config" else "monitor_group",
+        {
+            "task_config": END,
+            "monitor_group": "sandbox_launcher"
+        }
     )
-    workflow.add_edge("document", END)
     
-    return workflow.compile()
+    workflow.add_edge("sandbox_launcher", "visual_locator")
+    workflow.add_edge("visual_locator", "monitor")
+    workflow.add_edge("monitor", "multimodal")
+    workflow.add_edge("multimodal", "agent_decision")
+    
+    # Agent决策后的条件路由
+    workflow.add_conditional_edges(
+        "agent_decision",
+        lambda state: state.get("action_type", "continue"),
+        {
+            "write_report": "document_executor",
+            "update_ledger": "document_executor",
+            "save_message": END,
+            "continue": END
+        }
+    )
+    
+    workflow.add_edge("document_executor", END)
+    
+    return workflow.compile(checkpointer=RedisCheckpointSaver(redis_conn))
 ```
 
-### 5.4 API服务器生命周期管理
+### 5.4 LLM意图识别初始化
+
+```python
+# intent_recognition/chains.py
+from langchain_community.chat_models import ChatOllama
+from langchain.prompts import ChatPromptTemplate
+from config.settings import settings
+
+def create_intent_recognition_chain():
+    """创建LLM意图识别链"""
+    llm = ChatOllama(
+        model=settings.ai.ollama.intent_model,
+        base_url=settings.ai.ollama.base_url,
+        temperature=settings.intent_recognition.temperature,
+        num_predict=settings.intent_recognition.max_tokens
+    )
+    
+    prompt = ChatPromptTemplate.from_template("""
+你是一个意图识别助手，负责识别用户消息的意图。
+
+用户消息：{user_message}
+
+请判断用户意图并返回以下三种之一：
+- task_config：用户发送任务配置消息（如：工作1（地点A）人员1，人员2）
+- monitor_group：用户发送群聊监控指令（如：监控微信群聊SSS）
+- other：其他意图
+
+仅返回意图类型，不要其他内容。
+""")
+    
+    chain = prompt | llm
+    return chain
+```
+
+### 5.5 LLM视觉定位初始化
+
+```python
+# visual_locator/chains.py
+from langchain_community.chat_models import ChatOllama
+from langchain.prompts import ChatPromptTemplate
+from config.settings import settings
+
+def create_visual_locator_chain():
+    """创建LLM视觉定位链"""
+    llm = ChatOllama(
+        model=settings.ai.ollama.vision_model,
+        base_url=settings.ai.ollama.base_url,
+        temperature=settings.visual_locator.temperature,
+        num_predict=settings.visual_locator.max_tokens
+    )
+    
+    prompt = ChatPromptTemplate.from_template("""
+你是一个视觉定位助手，负责在微信界面中定位特定区域。
+
+目标群聊名称：{group_name}
+
+请识别并返回以下区域坐标（像素坐标，格式为[x1, y1, x2, y2]）：
+1. target_group：目标群聊区域
+2. message_send_area：消息发送区域
+3. message_receive_area：消息接收区域
+
+请返回JSON格式的坐标信息。
+""")
+    
+    chain = prompt | llm
+    return chain
+```
+
+### 5.6 Agent决策初始化
+
+```python
+# agent_decision/chains.py
+from langchain_community.chat_models import ChatOllama
+from langchain.prompts import ChatPromptTemplate
+from config.settings import settings
+
+def create_agent_decision_chain():
+    """创建Agent决策链"""
+    llm = ChatOllama(
+        model=settings.ai.ollama.decision_model,
+        base_url=settings.ai.ollama.base_url,
+        temperature=settings.agent_decision.temperature,
+        num_predict=settings.agent_decision.max_tokens
+    )
+    
+    prompt = ChatPromptTemplate.from_template("""
+你是一个AI Agent，负责根据群聊消息内容自主决策后续操作。
+
+群聊消息：{message_content}
+上下文：{context}
+
+请根据消息内容决定执行以下哪种操作：
+- write_report：生成日报
+- update_ledger：更新Excel台账
+- save_message：保存消息到数据库
+- continue：继续监控，不执行操作
+
+返回格式：{"action_type": "操作类型", "reason": "决策原因"}
+""")
+    
+    chain = prompt | llm
+    return chain
+```
+
+### 5.7 API服务器生命周期管理
 
 ```python
 # services/wechat_sandbox/api_server.py
@@ -379,6 +667,9 @@ docker exec -it ollama ollama pull qwen3-vl-8b:latest
 
 # 拉取嵌入模型
 docker exec -it ollama ollama pull qwen3-embedding-4b
+
+# 拉取意图识别和Agent决策模型
+docker exec -it ollama ollama pull qwen3-72b:latest
 ```
 
 #### 初始化知识库

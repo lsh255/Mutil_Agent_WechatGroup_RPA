@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("Starting Producer Service...")
         
-        queue_manager = RedisQueueManager()
+        queue_manager = RedisQueueManager(config.to_dict())
         producer1 = Producer1Observer(queue_manager)
         producer2 = Producer2ContentFetcher(queue_manager)
         
@@ -144,7 +144,7 @@ async def message_stream_generator() -> AsyncGenerator[str, None]:
                         }, ensure_ascii=False)
                         
                         yield f"data: {message_json}\n\n"
-                        logger.debug(f"Streamed message: {message.get('id')}")
+                        logger.info(f"Streamed message: {message.get('id')}")
             
             await asyncio.sleep(0.5)
             

@@ -1,0 +1,139 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: wechat-redis-prod
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-default_password}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-default_password}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - wechat-network
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: wechat-ollama-prod
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - wechat-network
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: ../..
+      dockerfile: docker/orchestrator/Dockerfile
+    container_name: wechat-orchestrator-prod
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-default_password}
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
+      - LOG_LEVEL=INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - wechat-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../../docker/frontend/Dockerfile
+    container_name: wechat-frontend-prod
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=${API_URL:-http://localhost:8000}
+      - VITE_WS_URL=${WS_URL:-ws://localhost:8000/ws}
+    depends_on:
+      - orchestrator
+    networks:
+      - wechat-network
+    restart: unless-stopped
+
+  wechat-sandbox:
+    build:
+      context: ../..
+      dockerfile: docker/sandbox/Dockerfile
+    container_name: wechat-sandbox-prod
+    ports:
+      - "6080:6080"
+      - "5900:5900"
+      - "8000:8000"
+    environment:
+      - DISPLAY=:99
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-default_password}
+      - REDIS_DB=0
+      - VNC_PASSWORD=${VNC_PASSWORD:-vnc123}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./sandbox/media:/app/media
+      - ./sandbox/logs:/app/logs
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+    networks:
+      - wechat-network
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: wechat-nginx-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - orchestrator
+    networks:
+      - wechat-network
+    restart: unless-stopped
+
+networks:
+  wechat-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  redis_data:
+  ollama_data:

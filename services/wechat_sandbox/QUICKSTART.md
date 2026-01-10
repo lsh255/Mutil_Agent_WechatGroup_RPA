@@ -2,19 +2,36 @@
 
 ## 目录结构说明
 
-| 文件 | 用途 |
-|------|------|
+| 文件/目录 | 用途 |
+|-----------|------|
 | [Dockerfile](./Dockerfile) | 生产环境基础镜像（分层设计） |
 | [Dockerfile.test](./Dockerfile.test) | 测试环境镜像（添加 FastAPI） |
 | [docker-compose.yml](./docker-compose.yml) | 生产单实例部署 |
 | [docker-compose.multi.yml](./docker-compose.multi.yml) | 生产多实例部署（3 个实例） |
 | [docker-compose.test.yml](./docker-compose.test.yml) | 测试单实例部署（含 FastAPI） |
+| [start_wechat.sh](./start_wechat.sh) | 微信沙箱启动脚本（Xvfb、Fluxbox、noVNC、WeChat） |
+| [requirements.txt](./requirements.txt) | Python 依赖列表 |
+| [producer_service/](./producer_service/) | 生产者服务核心模块（消息监控、提取、分类） |
+| [producer_service/api_server.py](./producer_service/api_server.py) | FastAPI 服务器（SSE 流、健康检查、管理 API） |
+| [producer_service/producer1_observer.py](./producer_service/producer1_observer.py) | 生产者1：消息观察者（监控、检测气泡） |
+| [producer_service/producer2_content_fetcher.py](./producer_service/producer2_content_fetcher.py) | 生产者2：内容获取者（点击、提取文本/媒体） |
+| [producer_service/queue_manager.py](./producer_service/queue_manager.py) | Redis Stream 队列管理器 |
+| [producer_service/monitor.py](./producer_service/monitor.py) | 视觉监控器（定位微信窗口、截屏） |
+| [producer_service/detector.py](./producer_service/detector.py) | 变化检测器（dHash、气泡检测） |
+| [producer_service/classifier.py](./producer_service/classifier.py) | 消息类型分类器（文本/图片/视频/链接） |
+| [producer_service/extractor.py](./producer_service/extractor.py) | 精确内容获取器（双击复制、点击打开媒体） |
+| [producer_service/monitor.py](./producer_service/monitor.py) | 监控服务（Redis 队列监控） |
+| [app/](./app/) | FastAPI 应用入口 |
+| [static/](./static/) | 静态资源（Web 管理界面） |
+| [tests/](./tests/) | 单元测试和集成测试 |
+| [utils/](./utils/) | 工具模块（配置、日志） |
+| [archive/](./archive/) | 归档文件 |
 
 ## 准备工作
 
 ### 1. 确保以下文件存在
 
-在 `services/wechat_sandbox` 目录下：
+在 `services/wechat_sandbox/build` 目录下：
 - `WeChatLinux_x86_64.deb` - 微信 Linux 版安装包
 - `fonts-noto-cjk_20240730+repack1-1_all.deb` - 中文字体包
 

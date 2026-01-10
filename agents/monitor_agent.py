@@ -4,7 +4,13 @@ from typing import Optional, Callable
 import structlog
 from docker import DockerClient, from_env
 from docker.errors import DockerException
-from ...config import settings
+from config import settings
+import sys
+import os
+
+# 添加 wechat_sandbox 路径
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'services', 'wechat_sandbox'))
+from producer_service.agent_consumer import get_consumer
 
 # 配置结构化日志
 logger = structlog.get_logger()
@@ -24,6 +30,7 @@ class MonitorAgent:
         self.container_name = "wechat-sandbox"
         self.is_running = False
         self.message_callback: Optional[Callable] = None
+        self.agent_consumer = None
     
     def _init_docker_client(self):
         """初始化Docker客户端"""
@@ -110,35 +117,14 @@ class MonitorAgent:
             logger.error("停止容器失败", error=str(e))
             return False
     
-    async def _consume_message_stream(self):
-        """消费微信消息流"""
-        stream_url = f"{settings.wechat_sandbox.producer_service_url}/stream"
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                async with client.stream("GET", stream_url, timeout=None) as response:
-                    if response.status_code == 200:
-                        async for line in response.aiter_lines():
-                            if line.startswith("data: "):
-                                data = line[6:]  # 移除 "data: " 前缀
-                                await self._process_message(data)
-                    else:
-                        logger.error("连接消息流失败", status_code=response.status_code)
-                        
-            except Exception as e:
-                logger.error("消费消息流异常", error=str(e))
-    
-    async def _process_message(self, message_data: str):
-        """处理接收到的消息
+    async def _process_message(self, message: dict):
+        """处理接收到的消息（已转换格式）
         
         Args:
-            message_data: 消息数据（JSON字符串）
+            message: 消息数据（AgentConsumer已转换格式）
         """
         try:
-            import json
-            message = json.loads(message_data)
-            
-            logger.info("收到消息", sender=message.get("sender"), content=message.get("content")[:50])
+            logger.info("收到消息", sender=message.get("sender"), content=str(message.get("content", ""))[:50])
             
             # 触发工作流
             await self._trigger_workflow(message)
@@ -191,10 +177,24 @@ class MonitorAgent:
         
         self.is_running = True
         
-        # 开始消费消息流
+        # 初始化Agent消费者（使用AgentConsumer进行消息转换和转发）
+        producer_url = getattr(settings.wechat_sandbox, 'producer_service_url', 'http://localhost:6789')
+        self.agent_consumer = get_consumer(
+            producer_service_url=producer_url,
+            orchestrator_url=self.orchestrator_url
+        )
+        
+        # 使用AgentConsumer启动消费（auto_forward=False，由MonitorAgent处理回调）
+        asyncio.create_task(self._consume_with_callback())
+    
+    async def _consume_with_callback(self):
+        """使用AgentConsumer消费消息并调用回调"""
         while self.is_running:
             try:
-                await self._consume_message_stream()
+                async for message in self.agent_consumer._consume_stream():
+                    if not self.is_running:
+                        break
+                    await self._process_message(message)
             except Exception as e:
                 logger.error("消息流异常，5秒后重试", error=str(e))
                 await asyncio.sleep(5)
@@ -203,4 +203,8 @@ class MonitorAgent:
         """停止监控Agent"""
         logger.info("停止监控Agent")
         self.is_running = False
+        
+        if self.agent_consumer:
+            self.agent_consumer.stop()
+        
         self.stop_container()

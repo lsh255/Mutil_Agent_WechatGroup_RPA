@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ../..
+      dockerfile: docker/orchestrator/Dockerfile
+      target: development
+    container_name: wechat-orchestrator-dev
+    ports:
+      - "8000:8000"
+      - "5678:5678"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../..:/app
+      - /app/__pycache__
+    command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", "-m", "uvicorn", "services.orchestrator.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    networks:
+      - wechat-network
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../../docker/frontend/Dockerfile
+    container_name: wechat-frontend-dev
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000/ws
+    volumes:
+      - ../../frontend/src:/app/src:ro
+    networks:
+      - wechat-network
+
+  wechat-sandbox:
+    build:
+      context: ../..
+      dockerfile: docker/sandbox/Dockerfile
+    container_name: wechat-sandbox-dev
+    ports:
+      - "6080:6080"
+      - "5900:5900"
+      - "8001:8000"
+    environment:
+      - DISPLAY=:99
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - VNC_PASSWORD=vnc123
+      - DEBUG=true
+    volumes:
+      - ./sandbox/media:/app/media
+      - ./sandbox/logs:/app/logs
+      - ../../services/wechat_sandbox:/app/services:ro
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+    networks:
+      - wechat-network
+
+networks:
+  wechat-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

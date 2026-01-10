@@ -1,0 +1,28 @@
+wechat:
+  target_group_name: Test Group
+
+monitor:
+  capture_interval_ms: 200
+  save_directory: ./data
+
+roi:
+  presets:
+    send_area:
+      name: 发送区域
+      description: 微信消息输入和发送区域
+      coordinates: [0, 0, 0, 0]
+      enabled: true
+    receive_area:
+      name: 接收区域
+      description: 群消息接收和显示区域
+      coordinates: [0, 0, 0, 0]
+      enabled: true
+  active_preset: receive_area
+
+redis:
+  host: redis
+  port: 6379
+  db: 0
+  password: null
+  stream_raw: wechat:messages:raw
+  stream_precise: wechat:messages:precise
