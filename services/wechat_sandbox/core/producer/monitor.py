@@ -47,14 +47,13 @@ class VisualMonitor:
         - 运行状态标志
         - 线程安全锁
         """
-        self.wechat_window = None  # 微信主窗口 ID
-        self.sub_window = None  # 消息渲染子窗口 ID
-        self.roi = None  # 监控区域坐标 (left, top, right, bottom)
-        self.interval = 0.2  # 截图间隔（秒），默认 200ms
-        self.running = False  # 监控运行状态标志
-        self.config_lock = threading.Lock()  # 配置更新锁，保证线程安全
+        self.wechat_window = None
+        self.sub_window = None
+        self.roi = None
+        self.interval = 0.2
+        self.running = False
+        self.config_lock = threading.Lock()
 
-        # 从配置文件加载 ROI 设置
         self.load_roi_from_config()
 
         logger.info("VisualMonitor (Linux WeChat) initialized")
@@ -75,21 +74,19 @@ class VisualMonitor:
         """
         try:
             import yaml
-            config_file = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
+            config_file = os.path.join(os.path.dirname(__file__), '..', '..', 'config.yaml')
             if os.path.exists(config_file):
                 with open(config_file, 'r', encoding='utf-8') as f:
                     cfg = yaml.safe_load(f)
                     if cfg and 'roi' in cfg:
                         roi_config = cfg['roi']
                         
-                        # 支持新格式：multi-preset
                         if isinstance(roi_config, dict) and 'presets' in roi_config:
                             active_preset = roi_config.get('active_preset', 'receive_area')
                             if active_preset in roi_config['presets']:
                                 coordinates = roi_config['presets'][active_preset]['coordinates']
                                 self.roi = tuple(coordinates)
                                 logger.info(f"已加载 ROI (预设: {active_preset}): {self.roi}")
-                        # 兼容旧格式：flat list
                         elif isinstance(roi_config, list) and len(roi_config) == 4:
                             self.roi = tuple(roi_config)
                             logger.info(f"已加载 ROI (旧格式): {self.roi}")
@@ -129,8 +126,6 @@ class VisualMonitor:
             bool: 是否成功找到窗口
         """
         try:
-            # 使用 xdotool 查找微信窗口
-            # 注意：窗口名称可能因微信版本或语言设置而不同
             result = subprocess.run(
                 ['xdotool', 'search', '--name', 'WeChat'],
                 capture_output=True,
@@ -138,12 +133,10 @@ class VisualMonitor:
             )
 
             if result.returncode == 0 and result.stdout.strip():
-                # 获取第一个匹配的窗口 ID
                 window_id = result.stdout.strip().split('\n')[0]
                 self.wechat_window = window_id
                 logger.info(f"已找到微信窗口 ID: {window_id}")
 
-                # 获取窗口几何信息（位置和尺寸）
                 geom_result = subprocess.run(
                     ['xdotool', 'getwindowgeometry', window_id],
                     capture_output=True,

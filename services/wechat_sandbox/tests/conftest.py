@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from utils.logger import logger
-from producer_service.queue_manager import RedisQueueManager as QueueManager
+from core.queue.manager import QueueManager
 
 
 @pytest.fixture(scope="session")

@@ -32,14 +32,24 @@ RUN pip3 install --no-cache-dir \
 # 设置工作目录为 /app
 WORKDIR /app
 
-# 复制 FastAPI 应用代码到容器
-COPY app/ /app/app/
+# 复制 API 模块代码到容器
+COPY services/wechat_sandbox/api/ /app/api/
+
+# 复制核心业务逻辑代码到容器
+COPY services/wechat_sandbox/core/ /app/core/
+
+# 复制工具模块到容器
+COPY services/wechat_sandbox/utils/ /app/utils/
+
+# 复制服务模块到容器
+COPY services/wechat_sandbox/services/ /app/services/
 
 # 复制主启动脚本到容器
-COPY main.py /app/main.py
+COPY services/wechat_sandbox/main.py /app/main.py
 
 # 复制微信启动脚本到容器
-COPY start_wechat.sh /app/start_wechat.sh
+COPY docker/scripts/start_wechat.sh /app/start_wechat.sh
+RUN chmod +x /app/start_wechat.sh
 
 # 创建日志和媒体目录
 RUN mkdir -p /app/logs /app/media
@@ -47,5 +57,8 @@ RUN mkdir -p /app/logs /app/media
 # 暴露 FastAPI 端口
 EXPOSE 8000
 
-# 容器启动时执行启动脚本
-CMD ["/bin/bash", "/app/start_wechat.sh"]
+# 复制配置文件到容器
+COPY services/wechat_sandbox/config.yaml /app/config.yaml
+
+# 容器启动时执行主启动脚本
+CMD ["python3", "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]

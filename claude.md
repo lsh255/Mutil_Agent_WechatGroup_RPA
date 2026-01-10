@@ -15,16 +15,39 @@ Mutil_Agent_WechatGroup_RPA/
 │   ├── decision_agent.py            # 决策智能体
 │   ├── monitor_agent.py             # 监控智能体
 │   └── prompts/                     # 智能体提示词目录
+├── docker/                          # Docker相关配置（统一管理）
+│   ├── sandbox/                     # WeChat Sandbox Docker配置
+│   │   ├── Dockerfile               # 生产环境基础镜像
+│   │   ├── Dockerfile.test          # 测试环境镜像
+│   │   └── docker-compose.test.yml  # 测试环境编排
+│   ├── compose/                     # Docker Compose配置
+│   │   ├── docker-compose.yml       # 生产单实例部署
+│   │   ├── docker-compose.multi.yml # 生产多实例部署
+│   │   └── docker-compose.sandbox.test.yml # 沙箱测试环境
+│   ├── orchestrator/                # Orchestrator Docker配置
+│   ├── scripts/                     # 统一启动脚本目录
+│   │   ├── start_wechat.sh          # 微信沙箱启动脚本
+│   │   ├── start_wechat_sandbox.bat # Windows启动脚本
+│   │   └── start_sandbox.sh         # 通用沙箱启动脚本
+│   └── frontend/                    # Frontend Docker配置
 ├── services/
-│   └── wechat_sandbox/              # 微信沙盒服务
-│       ├── producer_service/        # 双生产者架构
-│       │   ├── extractor.py         # 消息内容提取器（Linux专用）
-│       │   ├── classifier.py        # 消息类型分类器
-│       │   ├── visual_monitor.py    # 视觉监控器
-│       │   ├── change_detector.py   # 变化检测器
-│       │   └── api_server.py        # SSE流式API服务器
+│   └── wechat_sandbox/              # 微信沙盒服务（业务代码和文档）
+│       ├── api/                     # API接口层
+│       ├── core/                    # 核心业务逻辑层
+│       ├── services/                # 服务编排层
+│       ├── utils/                   # 工具模块
+│       ├── tests/                   # 测试文件
+│       ├── archive/                 # 归档文件
+│       ├── README.md                # 项目总览
+│       ├── QUICKSTART.md            # 快速启动指南
+│       ├── ARCHITECTURE.md          # 架构说明
+│       ├── BUSINESS_LOGIC_TEST.md   # 测试指南
 │       ├── main.py                  # 服务入口
-│       └── config.yaml              # 配置文件
+│       ├── backup_start.py          # 备用启动脚本
+│       ├── config.yaml              # 配置文件
+│       ├── config.production.yaml   # 生产环境配置
+│       ├── requirements.txt         # Python依赖
+│       └── run_tests.py             # 测试运行脚本
 ├── workflows/                        # 工作流定义
 │   └── main_workflow.py             # LangGraph主工作流
 ├── utils/                           # 工具模块
@@ -132,19 +155,111 @@ Mutil_Agent_WechatGroup_RPA/
 - 使用 `asyncio.Queue` 和 `Event` 管理客户端连接
 - 支持多客户端并发连接
 
-### 2025-01-10: 平台适配层设计（待实施）
+### 2025-01-10: 平台适配层设计
 **决策**: 设计PlatformAdapter抽象层支持Windows/Linux跨平台
 **原因**:
 - 当前 `extractor.py` 仅支持Linux（xdotool/xclip）
 - 项目需要支持Windows环境下的微信客户端
 - 避免硬编码平台特定逻辑
 
-**实施计划**:
-- 创建 `producer_service/platform_adapter.py`
+**实施**:
+- 创建 `core/platform/adapter.py`
 - 定义抽象接口：`click_mouse`, `double_click`, `copy_to_clipboard`, `get_clipboard`
 - 实现Linux适配器（xdotool/xclip）
 - 实现Windows适配器（pywin32/ctypes）
 - 工厂模式根据操作系统选择适配器
+
+### 2025-01-10: wechat_sandbox目录结构重构（方案一）
+**决策**: 采用方案一重构 `wechat_sandbox` 目录结构
+**原因**:
+- 原目录结构杂乱，`app/` 和 `producer_service/` 职责不清晰
+- 核心业务逻辑分散，难以维护
+- 缺乏清晰的功能分层
+
+**新目录结构**:
+```
+wechat_sandbox/
+├── api/                           # API接口层
+│   ├── __init__.py               # FastAPI应用入口（统一路由注册）
+│   ├── config.py                 # 配置管理路由
+│   ├── instance.py               # 服务实例管理路由
+│   ├── stream.py                 # SSE流式接口
+│   └── health.py                 # 健康检查接口
+├── core/                          # 核心业务逻辑层
+│   ├── producer/                 # 消息生产者
+│   │   ├── monitor.py            # 视觉监控器
+│   │   ├── observer.py           # 消息气泡观察者
+│   │   └── content_fetcher.py    # 精确内容获取器
+│   ├── queue/                    # Redis队列管理
+│   │   └── manager.py
+│   ├── detector/                 # 变化检测与边界识别
+│   │   └── detector.py
+│   ├── extractor/                # 消息内容提取
+│   │   └── extractor.py
+│   ├── classifier/               # 消息类型分类
+│   │   └── classifier.py
+│   └── platform/                 # 跨平台适配层
+│       └── adapter.py
+├── services/                      # 服务编排层
+│   └── producer_service.py       # 生产者服务编排
+├── utils/                         # 工具模块
+│   ├── logger.py
+│   └── config.py
+├── config.yaml                    # 配置文件
+└── main.py                        # 统一入口脚本
+```
+
+**实施**:
+- 创建备份目录 `wechat_sandbox.backup/`
+- 新建 `api/` 目录迁移所有API路由
+- 新建 `core/` 目录迁移核心业务逻辑（按功能划分子目录）
+- 新建 `services/` 目录实现服务编排层
+- 重写 `main.py` 使用新的目录结构
+- 更新 `Dockerfile` 和测试文件
+
+**关键改进**:
+- 清晰的分层架构（API → Services → Core）
+- 按功能组织核心逻辑，提高可维护性
+- 统一的入口点（`api/__init__.py` 注册所有路由）
+- 服务编排层统一管理组件生命周期
+
+### 2025-01-10: Docker和启动脚本统一管理
+**决策**: 将Docker相关文件和启动脚本从 `wechat_sandbox/` 迁移到 `docker/` 统一管理
+**原因**:
+- Docker配置和启动脚本是基础设施，不属于业务代码
+- 避免业务代码目录杂乱，提高可维护性
+- 便于跨服务复用Docker配置
+- 符合微服务最佳实践：基础设施与业务代码分离
+
+**实施**:
+- 迁移Docker文件到 `docker/sandbox/`：
+  - `Dockerfile` - 生产环境基础镜像
+  - `Dockerfile.test` - 测试环境镜像
+  - `docker-compose.test.yml` - 测试环境编排
+- 迁移Docker Compose文件到 `docker/compose/`：
+  - `docker-compose.yml` - 生产单实例部署
+  - `docker-compose.multi.yml` - 生产多实例部署
+  - `docker-compose.sandbox.test.yml` - 沙箱测试环境
+- 迁移启动脚本到 `docker/scripts/`：
+  - `start_wechat.sh` - 微信沙箱启动脚本
+  - `start_wechat_sandbox.bat` - Windows启动脚本
+  - `start_sandbox.sh` - 通用沙箱启动脚本
+- 保留配置文件在 `services/wechat_sandbox/`：
+  - `config.yaml` - WeChat特定配置，与业务代码紧密相关
+  - `config.production.yaml` - 生产环境配置
+- 保留文档文件在 `services/wechat_sandbox/`：
+  - `README.md` - 项目总览
+  - `QUICKSTART.md` - 快速启动指南
+  - `ARCHITECTURE.md` - 架构说明
+  - `BUSINESS_LOGIC_TEST.md` - 测试指南
+- 删除 `CONTEXT.md`（与 README.md 内容重复）
+
+**关键改进**:
+- 基础设施与业务代码分离，职责更清晰
+- Docker配置集中管理，便于版本控制和复用
+- 启动脚本统一目录，避免散落在各处
+- 更新所有相关文档中的路径引用
+- 配置文件保留在业务目录，与代码紧密耦合
 
 ## 技术栈版本约束
 - Python: 3.9+

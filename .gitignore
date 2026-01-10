@@ -49,11 +49,14 @@ environment.yml
 
 # Docker
 .dockerignore
+docker/sandbox/media/
+docker/sandbox/logs/
 
 # 测试
 .pytest_cache/
 .coverage
 htmlcov/
+services/wechat_sandbox/tests/test_report.html
 
 # 临时文件
 *.tmp
@@ -61,6 +64,29 @@ htmlcov/
 *.swp
 .DS_Store
 
+# 备份目录
+services/wechat_sandbox.backup/
+
 # 微信安装包
 services/wechat_sandbox/WeChatLinux_x86_64.deb
 *.deb
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# 前端构建产物
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/build/
+*.tsbuildinfo
+
+# 日志目录
+services/wechat_sandbox/logs/

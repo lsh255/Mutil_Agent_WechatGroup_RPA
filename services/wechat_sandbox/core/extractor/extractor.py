@@ -13,7 +13,7 @@ import subprocess
 import mss
 from utils.logger import logger
 from utils.config import config
-from .platform_adapter import get_adapter
+from ..platform.adapter import get_adapter
 
 class MessageExtractor:
     """
@@ -34,18 +34,17 @@ class MessageExtractor:
             numpy.ndarray: 裁剪后的图像
         """
         try:
-            x1, y1, x2, y2 = crop_coords  # 解包裁剪坐标
-            # 确保坐标在图像范围内
-            h, w = full_image.shape[:2]  # 获取图像高度和宽度
-            x1 = max(0, int(x1))  # 确保x1不小于0
-            y1 = max(0, int(y1))  # 确保y1不小于0
-            x2 = min(w, int(x2))  # 确保x2不大于图像宽度
-            y2 = min(h, int(y2))  # 确保y2不大于图像高度
+            x1, y1, x2, y2 = crop_coords
+            h, w = full_image.shape[:2]
+            x1 = max(0, int(x1))
+            y1 = max(0, int(y1))
+            x2 = min(w, int(x2))
+            y2 = min(h, int(y2))
             
-            return full_image[y1:y2, x1:x2]  # 裁剪图像区域
-        except Exception as e:  # 捕获异常
-            logger.error(f"Extract compact failed: {e}")  # 记录错误日志
-            return None  # 返回None表示失败
+            return full_image[y1:y2, x1:x2]
+        except Exception as e:
+            logger.error(f"Extract compact failed: {e}")
+            return None
 
 class PrecisionContentFetcher:
     """
@@ -83,15 +82,12 @@ class PrecisionContentFetcher:
             str: 复制的文本内容，失败返回 None
         """
         try:
-            # 双击消息气泡
             self.adapter.double_click(screen_x, screen_y)
             time.sleep(self.double_click_interval)
             
-            # 模拟 Ctrl+C 复制
             self.adapter.copy_to_clipboard()
             time.sleep(self.clipboard_timeout)
             
-            # 读取剪贴板内容
             text_content = self.adapter.get_clipboard()
             
             if text_content:
@@ -171,12 +167,12 @@ class PrecisionContentFetcher:
         返回:
             dict: 包含内容的字典 {'type': ..., 'content': ...}
         """
-        if message_type == 'text':  # 文本消息
-            text = self.fetch_text(screen_x, screen_y)  # 获取文本内容
-            return {'type': 'text', 'content': text} if text else None  # 返回文本字典或None
-        elif message_type == 'media':  # 媒体消息
-            image = self.fetch_media(screen_x, screen_y)  # 获取媒体截图
-            return {'type': 'media', 'content': image} if image else None  # 返回媒体字典或None
-        else:  # 未知类型
-            logger.warning(f"未知消息类型: {message_type}")  # 记录警告日志
-            return None  # 返回None表示失败
+        if message_type == 'text':
+            text = self.fetch_text(screen_x, screen_y)
+            return {'type': 'text', 'content': text} if text else None
+        elif message_type == 'media':
+            image = self.fetch_media(screen_x, screen_y)
+            return {'type': 'media', 'content': image} if image else None
+        else:
+            logger.warning(f"未知消息类型: {message_type}")
+            return None

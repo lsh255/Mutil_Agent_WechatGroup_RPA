@@ -16,15 +16,15 @@ import io
 import sys
 import json
 
-from .queue_manager import RedisQueueManager
-from .extractor import PrecisionContentFetcher
-from .classifier import MessageTypeClassifier
+from core.queue.manager import QueueManager
+from core.extractor.text_extractor import PrecisionContentFetcher
+from core.detector.classifier import Classifier
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from utils.logger import logger
 from utils.config import config
 
-class Producer2ContentFetcher:
+class ContentFetcher:
     """
     生产者2：内容获取者
     
@@ -35,15 +35,9 @@ class Producer2ContentFetcher:
     """
     
     def __init__(self, queue_manager):
-        """
-        初始化生产者2
-        
-        输入:
-            queue_manager: 消息队列管理器实例
-        """
         self.queue_manager = queue_manager
         self.content_fetcher = PrecisionContentFetcher()
-        self.classifier = MessageTypeClassifier()
+        self.classifier = Classifier()
         self.running = False
         self.thread = None
         
@@ -56,15 +50,6 @@ class Producer2ContentFetcher:
         logger.info("Producer2 ContentFetcher initialized")
     
     def _save_media(self, image, msg_id):
-        """
-        保存高清图片到本地
-        
-        输入:
-            image: PIL Image对象
-            msg_id: 消息ID
-        返回:
-            str: 保存的文件路径
-        """
         filename = f"{msg_id}_high_res.png"
         filepath = os.path.join(self.media_directory, filename)
         
@@ -77,14 +62,6 @@ class Producer2ContentFetcher:
             return None
     
     def _base64_to_image(self, base64_str):
-        """
-        将base64字符串转换为PIL Image
-        
-        输入:
-            base64_str: base64编码的图片字符串
-        返回:
-            PIL.Image: PIL Image对象
-        """
         if not base64_str:
             return None
         
@@ -97,14 +74,6 @@ class Producer2ContentFetcher:
             return None
     
     def _image_to_base64(self, image):
-        """
-        将PIL Image转换为base64编码字符串
-        
-        输入:
-            image: PIL Image对象
-        返回:
-            str: base64编码的图片字符串
-        """
         if image is None:
             return None
         
@@ -119,7 +88,6 @@ class Producer2ContentFetcher:
             return None
     
     def start(self):
-        """启动生产者2线程"""
         if self.running:
             logger.warning("Producer2 ContentFetcher is already running")
             return
@@ -130,20 +98,15 @@ class Producer2ContentFetcher:
         logger.info("Producer2 ContentFetcher started")
     
     def stop(self):
-        """停止生产者2线程"""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
         logger.info("Producer2 ContentFetcher stopped")
     
     def _run(self):
-        """
-        主循环：从raw队列读取消息，点击获取精确内容
-        """
         try:
             while self.running:
                 try:
-                    # 从raw队列获取消息（使用Redis消费者组）
                     messages = self.queue_manager.read_raw_for_processing(block=True, timeout=1000)
                     
                     if not messages:
@@ -153,7 +116,6 @@ class Producer2ContentFetcher:
                         msg_id = raw_message['id']
                         position = raw_message['position']
                         
-                        # 将base64转换回PIL Image
                         bubble_img = self._base64_to_image(raw_message['bubble_img_base64'])
                         if bubble_img is None:
                             logger.error(f"Producer2: Failed to decode bubble image for {msg_id}")
@@ -165,12 +127,10 @@ class Producer2ContentFetcher:
                         
                         logger.info(f"Producer2: Processing message {msg_id} at ({screen_x}, {screen_y})")
                         
-                        # 1. 分类消息类型（先进行非交互式分类）
                         import numpy as np
                         bubble_array = np.array(bubble_img)
                         msg_type = self.classifier.classify(bubble_array)
                         
-                        # 2. 根据类型获取精确内容
                         precise_content = {
                             'type': msg_type,
                             'text': None,
@@ -179,7 +139,6 @@ class Producer2ContentFetcher:
                         }
                         
                         if msg_type == 'text':
-                            # 尝试双击复制文本
                             text_content = self.content_fetcher.fetch_text(screen_x, screen_y)
                             if text_content:
                                 precise_content['text'] = text_content
@@ -188,10 +147,8 @@ class Producer2ContentFetcher:
                                 logger.warning(f"Producer2: Failed to fetch text for {msg_id}")
                         
                         elif msg_type in ['image', 'video']:
-                            # 点击打开媒体查看器，获取高清图
                             media_img = self.content_fetcher.fetch_media(screen_x, screen_y)
                             if media_img:
-                                # 保存高清图片
                                 media_path = self._save_media(media_img, msg_id)
                                 if media_path:
                                     precise_content['media_path'] = media_path
@@ -203,7 +160,6 @@ class Producer2ContentFetcher:
                         else:
                             logger.info(f"Producer2: Skipping message type {msg_type} for {msg_id}")
                         
-                        # 3. 构造完整消息数据
                         enhanced_message = {
                             'id': msg_id,
                             'timestamp': raw_message['timestamp'],
@@ -219,11 +175,9 @@ class Producer2ContentFetcher:
                             }
                         }
                         
-                        # 4. 入队到precise队列供外部消费
                         self.queue_manager.enqueue_precise(enhanced_message)
                         logger.info(f"Producer2: Enqueued precise message {msg_id}")
                         
-                        # 5. 确认消息处理完成
                         self.queue_manager.ack_raw(redis_msg_id)
                     
                 except Exception as e:

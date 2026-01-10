@@ -37,8 +37,8 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./media:/app/media
-      - ./logs:/app/logs
+      - ./sandbox/media:/app/media
+      - ./sandbox/logs:/app/logs
       - wechat_data:/root/.wechat
     privileged: true
     cap_add:

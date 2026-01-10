@@ -20,7 +20,7 @@ def run_unit_tests():
             "tests/test_queue_manager.py",
             "tests/test_producer_service.py",
             "-v",
-            "-m", "not integration"
+            "-m", "unit"
         ],
         cwd=os.path.dirname(__file__)
     )
@@ -40,7 +40,8 @@ def run_api_tests():
         [
             sys.executable, "-m", "pytest",
             "tests/test_api_server.py",
-            "-v"
+            "-v",
+            "-m", "api"
         ],
         cwd=os.path.dirname(__file__)
     )

@@ -1,12 +1,10 @@
 import os  # 操作系统接口模块
 import subprocess  # 子进程管理模块
 import asyncio  # 异步 I/O 模块
-from app.main import app  # 导入 FastAPI 应用实例
+from api import app  # 导入 FastAPI 应用实例
+from utils.config import config  # 配置模块
+from utils.logger import logger  # 日志记录模块
 import uvicorn  # ASGI 服务器
-import logging  # 日志记录模块
-
-logging.basicConfig(level=logging.INFO)  # 配置日志级别为 INFO
-logger = logging.getLogger(__name__)  # 创建日志记录器
 
 async def start_wechat():  # 启动微信进程的异步函数
     try:  # 尝试启动微信

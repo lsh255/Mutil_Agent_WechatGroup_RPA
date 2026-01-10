@@ -155,7 +155,7 @@ class TestAPIModels:
         测试ROI模型验证
         """
         from pydantic import ValidationError
-        from producer_service.api_server import ROIModel
+        from api.config import ROIModel
         
         valid_data = {
             "left": 100,
@@ -176,7 +176,7 @@ class TestAPIModels:
         测试ROI模型负数验证
         """
         from pydantic import ValidationError
-        from producer_service.api_server import ROIModel
+        from api.config import ROIModel
         
         invalid_data = {
             "left": -100,
@@ -193,7 +193,7 @@ class TestAPIModels:
         测试ROI模型顺序验证
         """
         from pydantic import ValidationError
-        from producer_service.api_server import ROIModel
+        from api.config import ROIModel
         
         invalid_data = {
             "left": 500,
@@ -209,7 +209,7 @@ class TestAPIModels:
         测试缺失字段验证
         """
         from pydantic import ValidationError
-        from producer_service.api_server import ROIModel
+        from api.config import ROIModel
         
         invalid_data = {
             "left": 100,

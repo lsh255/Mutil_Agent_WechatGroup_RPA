@@ -1,6 +1,6 @@
-# Producer Service 测试快速启动指南
+# WeChat Sandbox 测试快速启动指南
 
-本指南专门用于测试 Producer Service 的业务逻辑。
+本指南专门用于测试 WeChat Sandbox 的业务逻辑。
 
 ## 前置条件
 
@@ -56,7 +56,10 @@ pytest tests/ --cov=producer_service --cov-report=html
 cd services/wechat_sandbox
 
 # 启动 FastAPI 服务（会自动启动 Producer1 和 Producer2）
-python -m producer_service.api_server
+python main.py
+
+# 或使用备用启动脚本
+python backup_start.py
 ```
 
 然后在另一个终端发送测试消息到 Redis：
@@ -68,22 +71,22 @@ redis-cli
 ```
 
 访问以下端点查看状态：
-- 健康检查: http://localhost:8000/health
-- 服务状态: http://localhost:8000/status
-- SSE 消息流: http://localhost:8000/stream
+- 健康检查: http://localhost:8000/api/health
+- 服务状态: http://localhost:8000/api/status
+- SSE 消息流: http://localhost:8000/api/stream
+- 配置管理: http://localhost:8000/api/config
+- 实例管理: http://localhost:8000/api/instance/start, http://localhost:8000/api/instance/stop
 
 ### 模式3：完整测试（含微信）
 
 需要完整的微信沙箱环境：
 
 ```bash
-cd services/wechat_sandbox
-
 # 1. 构建测试镜像
-docker build -f Dockerfile.test -t wechat_sandbox-test:latest .
+docker build -f docker/sandbox/Dockerfile.test -t wechat_sandbox-test:latest .
 
 # 2. 启动测试环境
-docker-compose -f docker-compose.test.yml up -d
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml up -d
 
 # 3. 访问 noVNC 登录微信
 # 打开浏览器访问: http://localhost:6080/vnc.html
@@ -91,7 +94,7 @@ docker-compose -f docker-compose.test.yml up -d
 # 在微信中扫码登录
 
 # 4. 查看服务日志
-docker-compose -f docker-compose.test.yml logs -f wechat_sandbox
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml logs -f wechat_sandbox
 
 # 5. 测试消息流
 # 在微信群中发送消息，观察 Producer Service 是否正确捕获
@@ -103,16 +106,22 @@ docker-compose -f docker-compose.test.yml logs -f wechat_sandbox
 
 ```bash
 # 健康检查
-curl http://localhost:8000/health
+curl http://localhost:8000/api/health
 
 # 获取服务状态
-curl http://localhost:8000/status
+curl http://localhost:8000/api/status
 
-# 获取屏幕截图
-curl http://localhost:8000/api/screenshot
+# 获取配置
+curl http://localhost:8000/api/config
 
-# 重启服务
-curl -X POST http://localhost:8000/api/restart
+# 启动实例
+curl -X POST http://localhost:8000/api/instance/start
+
+# 停止实例
+curl -X POST http://localhost:8000/api/instance/stop
+
+# SSE 消息流
+curl -N http://localhost:8000/api/stream
 ```
 
 ### 使用 Python 测试
@@ -122,14 +131,23 @@ import requests
 import json
 
 # 测试健康检查
-response = requests.get('http://localhost:8000/health')
+response = requests.get('http://localhost:8000/api/health')
+print(response.json())
+
+# 测试服务状态
+response = requests.get('http://localhost:8000/api/status')
+print(response.json())
+
+# 测试配置
+response = requests.get('http://localhost:8000/api/config')
+print(response.json())
+
+# 启动实例
+response = requests.post('http://localhost:8000/api/instance/start')
 print(response.json())
 
 # 测试 SSE 流
-import requests
-import json
-
-response = requests.get('http://localhost:8000/stream', stream=True)
+response = requests.get('http://localhost:8000/api/stream', stream=True)
 for line in response.iter_lines():
     if line:
         if line.startswith(b'data: '):
@@ -142,7 +160,7 @@ for line in response.iter_lines():
 ### 1. 测试 QueueManager
 
 ```python
-from producer_service.queue_manager import RedisQueueManager
+from core.queue.manager import RedisQueueManager
 
 # 初始化
 qm = RedisQueueManager()
@@ -168,7 +186,7 @@ if messages:
 ### 2. 测试 ChangeDetector
 
 ```python
-from producer_service.detector import ChangeDetector
+from core.detector.detector import ChangeDetector
 from PIL import Image
 
 # 加载测试图片
@@ -190,7 +208,7 @@ print(f"检测到 {len(bubbles)} 个气泡")
 ### 3. 测试 Classifier
 
 ```python
-from producer_service.classifier import MessageTypeClassifier
+from core.classifier.classifier import MessageTypeClassifier
 from PIL import Image
 
 # 加载测试图片
@@ -207,7 +225,7 @@ print(f"消息类型: {msg_type}")
 ### 4. 测试 Monitor（需要 xdotool）
 
 ```python
-from producer_service.monitor import VisualMonitor
+from core.producer.monitor import VisualMonitor
 
 # 初始化监控器
 monitor = VisualMonitor()
@@ -302,7 +320,7 @@ redis-cli
 ### 消息分类错误
 ```python
 # 调试分类器
-from producer_service.classifier import MessageTypeClassifier
+from core.classifier.classifier import MessageTypeClassifier
 import cv2
 
 classifier = MessageTypeClassifier()
@@ -316,7 +334,7 @@ img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
 ### SSE 流断开
 ```bash
 # 检查 FastAPI 日志
-docker-compose -f docker-compose.test.yml logs -f wechat_sandbox | grep stream
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml logs -f wechat_sandbox | grep stream
 
 # 使用 curl 测试连接
 curl -N http://localhost:8000/stream

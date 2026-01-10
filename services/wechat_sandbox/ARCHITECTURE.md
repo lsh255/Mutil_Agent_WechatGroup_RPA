@@ -60,50 +60,94 @@ wechat_sandbox 是一个基于 Docker 容器的微信沙箱环境，用于在隔
 
 ```
 wechat_sandbox/
-├── producer_service/           # 双生产者服务核心代码
-│   ├── monitor.py              # 屏幕监控模块
-│   ├── detector.py             # 变化检测模块
-│   ├── classifier.py           # 消息类型分类
-│   ├── extractor.py           # 内容提取模块
-│   ├── queue_manager.py        # Redis 队列管理
-│   ├── producer1_observer.py   # 生产者1：观察者
-│   ├── producer2_content_fetcher.py  # 生产者2：内容获取器
-│   └── api_server.py           # FastAPI 服务器
+├── api/                        # API 模块
+│   ├── __init__.py            # FastAPI 应用初始化
+│   ├── config.py              # 配置管理端点
+│   ├── health.py              # 健康检查端点
+│   ├── instance.py            # 实例管理端点
+│   └── stream.py              # SSE 流式输出端点
+├── core/                       # 核心业务逻辑
+│   ├── detector/              # 变化检测模块
+│   │   ├── detector.py        # 变化检测
+│   │   ├── change_detector.py # 屏幕变化检测
+│   │   ├── classifier.py      # 消息类型分类
+│   │   └── visual_monitor.py  # 视觉监控
+│   ├── extractor/             # 内容提取模块
+│   │   ├── extractor.py       # 内容提取
+│   │   └── text_extractor.py  # 文本提取
+│   ├── producer/              # 生产者模块
+│   │   ├── monitor.py         # 屏幕监控
+│   │   ├── observer.py        # 生产者1：观察者
+│   │   ├── content_fetcher.py # 生产者2：内容获取器
+│   │   └── agent_consumer.py  # Agent 消息消费者
+│   ├── queue/                 # 队列管理模块
+│   │   └── manager.py         # Redis 队列管理
+│   ├── classifier/            # 分类器模块
+│   │   └── classifier.py      # 消息分类器
+│   └── platform/              # 平台适配模块
+│       └── adapter.py        # 跨平台适配器
 ├── utils/                      # 工具模块
-│   ├── logger.py               # 日志工具
-│   └── config.py               # 配置管理
+│   ├── logger.py              # 日志工具
+│   ├── config.py              # 配置管理
+│   └── platform_adapter.py    # 平台适配器
+├── tests/                      # 测试模块
+│   ├── conftest.py            # 测试配置
+│   ├── test_queue_manager.py  # 队列管理测试
+│   ├── test_producer_service.py # 生产者服务测试
+│   ├── test_api_server.py     # API 服务器测试
+│   └── test_integration.py    # 集成测试
+├── services/                   # 服务模块
+│   └── producer_service.py    # 生产者服务（兼容层）
+├── main.py                     # 主启动脚本
+├── backup_start.py            # 备用启动脚本
+├── start.sh                    # Shell 启动脚本
 ├── start_wechat.sh             # 微信启动脚本
-├── start_service.py            # 服务启动脚本
+├── start_wechat_sandbox.bat    # Windows 启动脚本
 ├── Dockerfile                  # Docker 镜像定义
+├── Dockerfile.test             # 测试环境镜像
+├── docker-compose.test.yml     # 测试环境编排
+├── config.yaml                 # 配置文件
+├── config.production.yaml      # 生产环境配置
 └── requirements.txt            # Python 依赖
 ```
 
 ## 核心模块详解
 
-### 1. 屏幕监控模块 (monitor.py)
+### 1. API 模块 (api/)
 
 **职责**
-- 定期截取 Xvfb 虚拟显示的屏幕
-- 定位微信窗口位置
-- 提取感兴趣区域 (ROI) 用于消息检测
+- 提供 HTTP API 接口
+- 管理 Producer1 和 Producer2 的生命周期
+- 提供 SSE 流式输出端点
 
-**关键方法**
-- `capture()`: 截取当前屏幕
-- `start()`: 启动监控线程
-- `stop()`: 停止监控线程
-- `update_roi()`: 更新感兴趣区域
+**主要文件**
+- `__init__.py`: FastAPI 应用初始化和生命周期管理
+- `config.py`: 配置管理端点（获取/更新配置）
+- `health.py`: 健康检查端点（服务状态检查）
+- `instance.py`: 实例管理端点（启动/停止/重启）
+- `stream.py`: SSE 流式输出端点（消息推送）
 
-**依赖工具**
-- `xwininfo`: 定位微信窗口
-- `xdotool`: 模拟鼠标操作
-- `mss`: 屏幕截图（兼容 Docker Xvfb）
+**API 端点**
+- `GET /api/config`: 获取当前配置
+- `POST /api/config`: 更新配置
+- `GET /api/health`: 健康检查
+- `GET /api/status`: 获取服务状态
+- `POST /api/instance/start`: 启动实例
+- `POST /api/instance/stop`: 停止实例
+- `GET /api/stream`: SSE 流式输出消息
 
-### 2. 变化检测模块 (detector.py)
+### 2. 变化检测模块 (core/detector/)
 
 **职责**
 - 检测屏幕内容变化
 - 识别新的消息气泡
 - 提取消息气泡边界框
+
+**主要文件**
+- `detector.py`: 变化检测核心逻辑
+- `change_detector.py`: 屏幕变化检测
+- `classifier.py`: 消息类型分类
+- `visual_monitor.py`: 视觉监控
 
 **关键方法**
 - `detect_change()`: 检测屏幕变化
@@ -114,25 +158,16 @@ wechat_sandbox/
 - 使用 dHash 算法进行图像哈希比较
 - OpenCV 进行边界检测
 
-### 3. 消息类型分类模块 (classifier.py)
-
-**职责**
-- 判断消息类型（文本、图片、视频、链接等）
-- 识别媒体消息的特征图标
-
-**支持的消息类型**
-- `text`: 纯文本消息
-- `image`: 图片消息
-- `video`: 视频消息
-- `link`: 链接消息
-- `unknown`: 未知类型
-
-### 4. 内容提取模块 (extractor.py)
+### 3. 内容提取模块 (core/extractor/)
 
 **职责**
 - 从微信界面提取文本内容（通过剪贴板）
 - 截取媒体消息的高清截图
 - 执行鼠标点击、双击等操作
+
+**主要文件**
+- `extractor.py`: 内容提取核心逻辑
+- `text_extractor.py`: 文本提取
 
 **关键方法**
 - `fetch_text()`: 获取文本内容
@@ -146,12 +181,33 @@ wechat_sandbox/
 3. 复制文本或截取媒体
 4. 关闭查看器（ESC 键）
 
-### 5. Redis 队列管理模块 (queue_manager.py)
+### 4. 生产者模块 (core/producer/)
+
+**职责**
+- Producer1（Observer）：监控微信群聊界面，检测新消息气泡
+- Producer2（ContentFetcher）：从原始消息队列读取消息，提取精确内容
+- AgentConsumer：消费消息并与外部 Agent 通信
+
+**主要文件**
+- `monitor.py`: 屏幕监控
+- `observer.py`: 生产者1：观察者
+- `content_fetcher.py`: 生产者2：内容获取器
+- `agent_consumer.py`: Agent 消息消费者
+
+**工作流程**
+1. Observer 启动屏幕监控，检测新消息气泡，入队原始消息
+2. ContentFetcher 从原始消息队列读取，分类消息类型，提取精确内容，入队精确消息
+3. AgentConsumer 消费精确消息，格式化为 Agent 可识别格式，发送到外部系统
+
+### 5. 队列管理模块 (core/queue/)
 
 **职责**
 - 管理 Redis Stream 消息队列
 - 提供消息入队、出队、确认操作
 - 实现消息锁定机制防止并发重复处理
+
+**主要文件**
+- `manager.py`: Redis 队列管理
 
 **队列结构**
 - `stream_raw`: 原始消息队列（Producer1 → Producer2）
@@ -170,54 +226,36 @@ wechat_sandbox/
 - 锁超时时间: 可配置（默认 300 秒）
 - 在读取消息时获取锁，确认处理后释放锁
 
-### 6. 生产者1：观察者 (producer1_observer.py)
+### 6. 分类器模块 (core/classifier/)
 
 **职责**
-- 监控微信群聊界面
-- 检测新出现的消息气泡
-- 将消息气泡信息入队到原始消息队列
+- 判断消息类型（文本、图片、视频、链接等）
+- 识别媒体消息的特征图标
 
-**工作流程**
-1. 启动屏幕监控
-2. 定期检测屏幕变化
-3. 识别新消息气泡
-4. 计算消息气泡的绝对坐标
-5. 入队原始消息（包含位置信息和缩略图）
+**主要文件**
+- `classifier.py`: 消息分类器
 
-### 7. 生产者2：内容获取器 (producer2_content_fetcher.py)
+**支持的消息类型**
+- `text`: 纯文本消息
+- `image`: 图片消息
+- `video`: 视频消息
+- `link`: 链接消息
+- `unknown`: 未知类型
 
-**职责**
-- 从原始消息队列读取消息
-- 根据消息类型提取精确内容
-- 将完整消息入队到精确消息队列
-
-**工作流程**
-1. 从原始消息队列读取消息
-2. 解码消息气泡截图
-3. 分类消息类型
-4. 根据类型提取精确内容
-5. 构建完整消息对象
-6. 入队精确消息
-
-### 8. FastAPI 服务器 (api_server.py)
+### 7. 平台适配模块 (core/platform/)
 
 **职责**
-- 提供 HTTP API 接口
-- 管理 Producer1 和 Producer2 的生命周期
-- 提供 SSE 流式输出端点
+- 提供跨平台适配能力
+- 封装不同平台的操作（Windows/Linux）
 
-**API 端点**
-- `GET /health`: 健康检查
-- `GET /status`: 获取服务状态
-- `GET /stream`: SSE 流式输出消息
-- `POST /roi`: 更新感兴趣区域配置
-- `GET /screenshot`: 获取当前屏幕截图
-- `POST /restart`: 重启服务
+**主要文件**
+- `adapter.py`: 跨平台适配器
 
-**生命周期管理**
-- 使用 FastAPI lifespan 上下文管理器
-- 启动时创建 Producer1 和 Producer2
-- 关闭时优雅停止所有生产者
+**关键方法**
+- `capture_screen()`: 截取屏幕
+- `get_window_position()`: 获取窗口位置
+- `click_mouse()`: 模拟鼠标点击
+- `copy_text()`: 复制文本到剪贴板
 
 ## 数据流
 
@@ -511,6 +549,12 @@ Docker 容器
   - 添加分布式锁防止并发重复处理
   - 优化日志级别
   - 修复 Docker Xvfb 兼容性问题
+
+- **v2.0.0**: 目录结构重构
+  - 重构为 `api/` 和 `core/` 目录结构
+  - 添加跨平台适配模块
+  - 集成 Agent 消息消费者
+  - 更新文档和测试路径
 
 ## 参考资料
 

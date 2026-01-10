@@ -7,6 +7,10 @@ import asyncio
 import json
 from typing import AsyncGenerator, Optional, Dict, Any
 import httpx
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from utils.logger import logger
 from utils.config import config
 
@@ -26,13 +30,6 @@ class AgentConsumer:
         producer_service_url: Optional[str] = None,
         orchestrator_url: Optional[str] = None
     ):
-        """
-        初始化Agent消费者
-        
-        输入:
-            producer_service_url: wechat_sandbox生产者服务URL
-            orchestrator_url: Orchestrator协调中心URL
-        """
         self.producer_service_url = producer_service_url or config.get(
             'producer_service', {}
         ).get('url', 'http://localhost:6789')
@@ -53,35 +50,6 @@ class AgentConsumer:
         self, 
         original_message: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """
-        转换消息格式为统一智能体系统期望的格式
-        
-        原始格式 (wechat_sandbox):
-        {
-            'id': 'msg_123',
-            'timestamp': '2025-01-10T12:00:00',
-            'type': 'text',
-            'position': {'x': 100, 'y': 200},
-            'precise_content': {'text': 'Hello', 'image': null},
-            'metadata': {'sender': 'user1', 'group': 'group1'}
-        }
-        
-        统一格式 (monitor_agent期望):
-        {
-            'id': 'msg_123',
-            'sender': 'user1',
-            'content': 'Hello',
-            'type': 'text',
-            'timestamp': '2025-01-10T12:00:00',
-            'position': {'x': 100, 'y': 200},
-            'metadata': {...}
-        }
-        
-        输入:
-            original_message: 原始消息字典
-        返回:
-            Dict[str, Any]: 转换后的消息字典
-        """
         try:
             precise_content = original_message.get('precise_content', {})
             metadata = original_message.get('metadata', {})
@@ -114,12 +82,6 @@ class AgentConsumer:
             return original_message
     
     async def _consume_stream(self) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        消费SSE消息流
-        
-        返回:
-            AsyncGenerator: 异步生成器，产生转换后的消息
-        """
         async with httpx.AsyncClient(timeout=None) as client:
             try:
                 async with client.stream(
@@ -142,7 +104,6 @@ class AgentConsumer:
                                 try:
                                     original_message = json.loads(data)
                                     
-                                    # 转换消息格式
                                     converted_message = self._convert_message_format(
                                         original_message
                                     )
@@ -168,14 +129,6 @@ class AgentConsumer:
                 logger.error("Unexpected error while consuming stream", error=str(e))
     
     async def _forward_to_orchestrator(self, message: Dict[str, Any]) -> bool:
-        """
-        转发消息到Orchestrator协调中心
-        
-        输入:
-            message: 转换后的消息字典
-        返回:
-            bool: 是否转发成功
-        """
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -207,12 +160,6 @@ class AgentConsumer:
             return False
     
     async def start(self, auto_forward: bool = True):
-        """
-        启动Agent消费者
-        
-        输入:
-            auto_forward: 是否自动转发消息到Orchestrator
-        """
         self.is_running = True
         logger.info("AgentConsumer started")
         
@@ -230,17 +177,10 @@ class AgentConsumer:
                 await asyncio.sleep(5)
     
     def stop(self):
-        """停止Agent消费者"""
         logger.info("Stopping AgentConsumer")
         self.is_running = False
     
     async def consume_once(self) -> Optional[Dict[str, Any]]:
-        """
-        消费一条消息（用于测试或按需消费）
-        
-        返回:
-            Optional[Dict[str, Any]]: 消息字典，如果没有消息则返回None
-        """
         try:
             async for message in self._consume_stream():
                 return message
@@ -249,7 +189,6 @@ class AgentConsumer:
             return None
 
 
-# 全局单例
 _consumer: Optional[AgentConsumer] = None
 
 
@@ -257,15 +196,6 @@ def get_consumer(
     producer_service_url: Optional[str] = None,
     orchestrator_url: Optional[str] = None
 ) -> AgentConsumer:
-    """
-    获取Agent消费者单例
-    
-    输入:
-        producer_service_url: wechat_sandbox生产者服务URL
-        orchestrator_url: Orchestrator协调中心URL
-    返回:
-        AgentConsumer: Agent消费者实例
-    """
     global _consumer
     if _consumer is None:
         _consumer = AgentConsumer(producer_service_url, orchestrator_url)

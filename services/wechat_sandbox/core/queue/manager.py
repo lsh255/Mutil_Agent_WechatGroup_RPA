@@ -11,10 +11,14 @@ import json
 import hashlib
 import time
 import redis
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from utils.logger import logger
 from utils.config import config
 
-class RedisQueueManager:
+class QueueManager:
     """
     基于Redis的双队列管理器
     
@@ -24,12 +28,6 @@ class RedisQueueManager:
     """
     
     def __init__(self, redis_config=None):
-        """
-        初始化Redis队列管理器
-        
-        输入:
-            redis_config: Redis配置字典，如果为None则从config读取
-        """
         if redis_config is None:
             redis_config = config.get('redis', {})
         
@@ -54,10 +52,9 @@ class RedisQueueManager:
         
         self._init_streams()
         
-        logger.info("RedisQueueManager initialized")
+        logger.info("QueueManager initialized")
     
     def _init_streams(self):
-        """初始化Redis Stream和消费者组"""
         try:
             self.redis_client.ping()
             logger.info("Redis connection successful")
@@ -83,14 +80,6 @@ class RedisQueueManager:
             raise
     
     def _prepare_message_data(self, item):
-        """
-        准备消息数据，序列化为JSON
-        
-        输入:
-            item: 消息字典
-        返回:
-            dict: 序列化后的消息数据
-        """
         message_data = {}
         for key, value in item.items():
             if key == 'bubble_img' or key == 'media_img':
@@ -99,26 +88,10 @@ class RedisQueueManager:
         return message_data
     
     def _generate_message_id(self, item):
-        """
-        生成消息唯一ID（基于内容hash）
-        
-        输入:
-            item: 消息字典
-        返回:
-            str: 消息ID
-        """
         content = json.dumps(item, sort_keys=True)
         return hashlib.md5(content.encode()).hexdigest()[:16]
     
     def _acquire_lock(self, message_id):
-        """
-        获取消息锁（防止并发重复处理）
-        
-        输入:
-            message_id: 消息ID
-        返回:
-            bool: 是否成功获取锁
-        """
         lock_key = f"{self.lock_prefix}{message_id}"
         lock_value = f"{self.consumer_name}_{int(time.time() * 1000)}"
         
@@ -142,12 +115,6 @@ class RedisQueueManager:
             return False
     
     def _release_lock(self, message_id):
-        """
-        释放消息锁
-        
-        输入:
-            message_id: 消息ID
-        """
         lock_key = f"{self.lock_prefix}{message_id}"
         
         try:
@@ -157,14 +124,6 @@ class RedisQueueManager:
             logger.error(f"Failed to release lock for message {message_id}: {e}")
     
     def enqueue_raw(self, item):
-        """
-        入队到原始消息队列
-        
-        输入:
-            item: 消息字典
-        返回:
-            str: 消息ID，失败返回None
-        """
         try:
             msg_id = self._generate_message_id(item)
             message_data = self._prepare_message_data(item)
@@ -183,15 +142,6 @@ class RedisQueueManager:
             return None
     
     def read_raw_for_processing(self, block=True, timeout=None):
-        """
-        读取原始消息供生产者2处理（带锁机制防止并发重复处理）
-        
-        输入:
-            block: 是否阻塞
-            timeout: 超时时间（毫秒）
-        返回:
-            list: 消息列表 [(message_id, {data}), ...]
-        """
         try:
             messages = self.redis_client.xreadgroup(
                 groupname=self.consumer_group_raw,
@@ -204,7 +154,6 @@ class RedisQueueManager:
             if messages:
                 for stream, msgs in messages:
                     for msg_id, msg_data in msgs:
-                        # 尝试获取消息锁
                         if not self._acquire_lock(msg_id):
                             logger.debug(f"Message {msg_id} already locked, skipping")
                             continue
@@ -221,19 +170,12 @@ class RedisQueueManager:
             return []
     
     def ack_raw(self, message_id):
-        """
-        确认原始消息处理完成（同时释放锁）
-        
-        输入:
-            message_id: 消息ID
-        """
         try:
             self.redis_client.xack(
                 self.stream_raw,
                 self.consumer_group_raw,
                 message_id
             )
-            # 释放消息锁
             self._release_lock(message_id)
             logger.info(f"ack_raw: Message {message_id} acknowledged and lock released")
             return True
@@ -242,14 +184,6 @@ class RedisQueueManager:
             return False
     
     def enqueue_precise(self, item):
-        """
-        入队到精确消息队列（供外部消费）
-        
-        输入:
-            item: 消息字典
-        返回:
-            str: 消息ID，失败返回None
-        """
         try:
             msg_id = self._generate_message_id(item)
             message_data = self._prepare_message_data(item)
@@ -268,14 +202,6 @@ class RedisQueueManager:
             return None
     
     def read_precise_for_streaming(self, count=10):
-        """
-        读取精确消息用于SSE流式输出
-        
-        输入:
-            count: 读取数量
-        返回:
-            list: 消息列表
-        """
         try:
             messages = self.redis_client.xrange(
                 name=self.stream_precise,
@@ -297,14 +223,6 @@ class RedisQueueManager:
             return []
     
     def _is_json(self, value):
-        """
-        检查字符串是否为JSON格式
-        
-        输入:
-            value: 字符串值
-        返回:
-            bool: 是否为JSON
-        """
         try:
             json.loads(value)
             return True
@@ -312,12 +230,6 @@ class RedisQueueManager:
             return False
     
     def get_stream_info(self):
-        """
-        获取Stream信息
-        
-        返回:
-            dict: Stream状态信息
-        """
         try:
             raw_info = self.redis_client.xinfo_stream(self.stream_raw)
             precise_info = self.redis_client.xinfo_stream(self.stream_precise)
@@ -337,9 +249,6 @@ class RedisQueueManager:
             return {'raw': {'length': 0}, 'precise': {'length': 0}}
     
     def close(self):
-        """
-        关闭Redis连接
-        """
         try:
             if self.redis_client:
                 self.redis_client.close()

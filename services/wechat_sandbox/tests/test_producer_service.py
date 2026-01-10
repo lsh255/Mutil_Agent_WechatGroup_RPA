@@ -17,7 +17,7 @@ class TestMonitor:
         """
         创建监控器实例
         """
-        from producer_service.monitor import Monitor
+        from core.producer.monitor import Monitor
         
         mock_config = {
             "target_group_name": "测试群",
@@ -25,7 +25,7 @@ class TestMonitor:
             "capture_interval_ms": 200
         }
         
-        with patch('producer_service.mct.mct_getCursorPos', return_value=(0, 0)):
+        with patch('core.producer.monitor.mct.mct_getCursorPos', return_value=(0, 0)):
             monitor = Monitor(
                 config=mock_config,
                 queue_manager=queue_manager
@@ -55,7 +55,7 @@ class TestMonitor:
         """
         测试截图功能（Mock）
         """
-        with patch('producer_service.monitor.ImageGrab.grab') as mock_grab:
+        with patch('core.producer.monitor.ImageGrab.grab') as mock_grab:
             mock_image = MagicMock()
             mock_image.size = (1920, 1080)
             mock_grab.return_value = mock_image
@@ -90,7 +90,7 @@ class TestDetector:
         """
         创建检测器实例
         """
-        from producer_service.detector import ChangeDetector
+        from core.detector.detector import ChangeDetector
         return ChangeDetector()
     
     @pytest.fixture
@@ -123,7 +123,7 @@ class TestClassifier:
         """
         创建分类器实例
         """
-        from producer_service.classifier import MessageTypeClassifier
+        from core.classifier.classifier import MessageTypeClassifier
         return MessageTypeClassifier()
     
     def test_classifier_initialization(self, classifier):
@@ -189,12 +189,12 @@ class TestProducer1:
         """
         测试生产者1初始化
         """
-        from producer_service.producer1_observer import Producer1
+        from core.producer.observer import Observer
         
         mock_monitor = Mock()
         mock_detector = Mock()
         
-        producer = Producer1(
+        producer = Observer(
             monitor=mock_monitor,
             detector=mock_detector,
             queue_manager=queue_manager
@@ -208,12 +208,12 @@ class TestProducer1:
         """
         测试生产者1发送消息
         """
-        from producer_service.producer1_observer import Producer1
+        from core.producer.observer import Observer
         
         mock_monitor = Mock()
         mock_detector = Mock()
         
-        producer = Producer1(
+        producer = Observer(
             monitor=mock_monitor,
             detector=mock_detector,
             queue_manager=queue_manager
@@ -238,9 +238,9 @@ class TestProducer2:
         """
         测试生产者2初始化
         """
-        from producer_service.producer2_content_fetcher import Producer2
+        from core.producer.content_fetcher import ContentFetcher
         
-        producer = Producer2(queue_manager=queue_manager)
+        producer = ContentFetcher(queue_manager=queue_manager)
         
         assert producer is not None
         assert producer.queue_manager == queue_manager
@@ -249,9 +249,9 @@ class TestProducer2:
         """
         测试生产者2发送精确消息
         """
-        from producer_service.producer2_content_fetcher import Producer2
+        from core.producer.content_fetcher import ContentFetcher
         
-        producer = Producer2(queue_manager=queue_manager)
+        producer = ContentFetcher(queue_manager=queue_manager)
         
         test_message = {
             "message_id": "test_p2_001",

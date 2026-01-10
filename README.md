@@ -10,6 +10,27 @@
 - **微信沙盒容器**: 独立的Docker化服务，提供微信客户端运行环境
 - **AI与知识库服务**: Ollama提供本地多模态模型，SiliconFlow提供云端Embedding模型，Chroma提供向量数据库
 - **协调中心**: FastAPI应用，提供管理界面和工作流触发接口
+- **前端管理界面**: React + TypeScript + Vite + Tailwind CSS，提供可视化的监控和管理功能
+
+### 微信沙盒架构
+
+微信沙盒采用分层架构设计：
+
+- **API接口层 (`api/`)**: FastAPI路由，提供REST API和SSE流式接口
+- **核心业务逻辑层 (`core/`)**: 包含消息生产者、队列管理、变化检测、内容提取、消息分类等核心模块
+- **服务编排层 (`services/`)**: 统一管理组件生命周期和服务编排
+- **工具模块 (`utils/`)**: 配置管理、日志记录、跨平台适配等工具函数
+
+### Docker配置统一管理
+
+所有Docker相关文件统一放在 `docker/` 目录下：
+
+- `docker/base/`: 基础镜像
+- `docker/compose/`: Docker Compose编排文件（开发、生产、测试环境）
+- `docker/frontend/`: 前端镜像
+- `docker/orchestrator/`: 协调中心镜像
+- `docker/sandbox/`: 微信沙盒镜像
+- `docker/scripts/`: 统一的启动脚本
 
 ## 项目结构
 
@@ -38,18 +59,39 @@ wechat-workflow-ai-agent/
 │   ├── orchestrator/                # 协调中心
 │   │   └── main.py                  # FastAPI应用
 │   └── wechat_sandbox/              # 微信沙盒
-│       ├── Dockerfile
-│       ├── start.sh
-│       └── producer_service/        # 消息生产者服务
+│       ├── api/                     # API接口层
+│       ├── core/                    # 核心业务逻辑层
+│       ├── services/                # 服务编排层
+│       ├── utils/                   # 工具模块
+│       ├── config.yaml              # 配置文件
+│       └── main.py                  # 统一入口脚本
+├── docker/                          # Docker相关配置（统一管理）
+│   ├── base/                        # 基础镜像
+│   ├── compose/                     # Docker Compose编排
+│   ├── frontend/                    # 前端镜像
+│   ├── orchestrator/                # 协调中心镜像
+│   ├── sandbox/                     # 微信沙盒镜像
+│   └── scripts/                     # 启动脚本
 ├── agents/                          # Agent模块
-│   └── monitor_agent.py             # 监控Agent
+│   ├── decision_agent.py            # 决策Agent
+│   ├── intent_agent.py              # 意图识别Agent
+│   ├── monitor_agent.py             # 监控Agent
+│   ├── visual_agent.py              # 视觉Agent
+│   └── prompts/                     # Prompt模板
+├── frontend/                        # 前端应用
+│   ├── src/                         # 源代码
+│   ├── package.json                 # 依赖配置
+│   └── vite.config.ts               # Vite配置
 ├── scripts/                         # 部署脚本
 │   ├── init_knowledge_base.py       # 初始化知识库
 │   └── start_all.py                 # 启动所有服务
 ├── templates/                       # 模板文件
 │   └── daily_report.j2              # 报告模板
+├── docs/                            # 文档
+│   ├── ENVIRONMENT_INIT.md          # 环境初始化
+│   └── ENVIRONMENT_SETUP.md         # 环境搭建
 ├── pyproject.toml                   # 项目依赖配置
-└── docker-compose.yml               # Docker编排配置
+└── requirements.txt                # Python依赖
 ```
 
 ## 技术栈
@@ -79,7 +121,7 @@ conda create -n wechat-workflow-agent python=3.12
 conda activate wechat-workflow-agent
 
 # 3. 启动基础设施
-docker-compose up -d redis ollama
+docker-compose -f docker/compose/docker-compose.dev.yml up -d redis ollama
 
 # 4. 拉取AI模型
 ollama pull qwen3-vl:latest
@@ -125,7 +167,7 @@ pip install -e .
 #### 2. 启动基础设施
 
 ```bash
-docker-compose up -d redis ollama
+docker-compose -f docker/compose/docker-compose.dev.yml up -d redis ollama
 ```
 
 #### 3. 拉取AI模型
@@ -259,7 +301,7 @@ open htmlcov/index.html
 
 ---
 
-## 微信消息生产者服务
+## 微信沙盒服务
 
 微信沙盒容器提供双生产者模型的消息生产服务，通过Redis和FastAPI暴露消息流供monitor_agent.py消费。
 
@@ -287,7 +329,7 @@ monitor_agent.py (SSE消费)
 ```bash
 cd services/wechat_sandbox
 pip install -r requirements.txt
-python start_service.py
+python main.py
 ```
 
 ### Docker部署
@@ -295,26 +337,24 @@ python start_service.py
 #### 单实例部署
 
 ```bash
-cd services/wechat_sandbox
-docker-compose up -d
+docker-compose -f docker/compose/docker-compose.yml up -d
 ```
 
-docker-compose.yml会启动两个容器：
+docker-compose.yml会启动以下容器：
 1. **redis**: Redis消息队列服务
-2. **producer_service**: 双生产者服务（包含Linux微信）
+2. **sandbox**: 微信沙盒服务（包含Linux微信）
 
 #### 多实例部署（多用户多群组）
 
 ```bash
-cd services/wechat_sandbox
-docker-compose -f docker-compose.multi.yml up -d
+docker-compose -f docker/compose/docker-compose.multi.yml up -d
 ```
 
-docker-compose.multi.yml会启动多个生产者服务实例：
+docker-compose.multi.yml会启动多个沙盒服务实例：
 1. **redis**: Redis消息队列服务
-2. **producer_service_1**: 实例1（端口8001/6081/5901）
-3. **producer_service_2**: 实例2（端口8002/6082/5902）
-4. **producer_service_3**: 实例3（端口8003/6083/5903）
+2. **sandbox_1**: 实例1（端口8001/6081/5901）
+3. **sandbox_2**: 实例2（端口8002/6082/5902）
+4. **sandbox_3**: 实例3（端口8003/6083/5903）
 
 ### Web管理界面
 
@@ -345,8 +385,7 @@ docker-compose.multi.yml会启动多个生产者服务实例：
 
 1. **启动服务**
    ```bash
-   cd services/wechat_sandbox
-   docker-compose up -d
+   docker-compose -f docker/compose/docker-compose.yml up -d
    ```
 
 2. **通过VNC登录微信**
@@ -413,22 +452,21 @@ monitor:
 
 ### 服务文件说明
 
-- `producer_service/queue_manager.py`: Redis队列管理器（使用Redis Streams）
-- `producer_service/producer1_observer.py`: 生产者1 - 消息观察者
-- `producer_service/producer2_content_fetcher.py`: 生产者2 - 内容获取者
-- `producer_service/monitor.py`: 视觉监控器（Linux微信版本）
-- `producer_service/detector.py`: 变化检测器
-- `producer_service/extractor.py`: 内容提取器（Linux微信版本）
-- `producer_service/classifier.py`: 消息类型分类器
-- `producer_service/api_server.py`: FastAPI服务器（含Web管理接口）
-- `utils/logger.py`: 日志工具
-- `utils/config.py`: 配置工具
-- `static/index.html`: Web管理界面
-- `start_service.py`: 服务启动脚本
-- `start.sh`: 容器启动脚本（VNC/noVNC初始化）
-- `docker-compose.yml`: 单实例Docker编排配置
-- `docker-compose.multi.yml`: 多实例Docker编排配置
-- `Dockerfile`: 生产者服务镜像构建（含VNC/noVNC）
+- `services/wechat_sandbox/core/queue/manager.py`: Redis队列管理器（使用Redis Streams）
+- `services/wechat_sandbox/core/producer/observer.py`: 生产者1 - 消息观察者
+- `services/wechat_sandbox/core/producer/content_fetcher.py`: 生产者2 - 内容获取者
+- `services/wechat_sandbox/core/producer/monitor.py`: 视觉监控器（Linux微信版本）
+- `services/wechat_sandbox/core/detector/detector.py`: 变化检测器
+- `services/wechat_sandbox/core/extractor/extractor.py`: 内容提取器（Linux微信版本）
+- `services/wechat_sandbox/core/classifier/classifier.py`: 消息类型分类器
+- `services/wechat_sandbox/api/__init__.py`: FastAPI应用入口（含Web管理接口）
+- `services/wechat_sandbox/utils/logger.py`: 日志工具
+- `services/wechat_sandbox/utils/config.py`: 配置工具
+- `services/wechat_sandbox/main.py`: 服务启动脚本
+- `docker/scripts/start_wechat.sh`: 容器启动脚本（VNC/noVNC初始化）
+- `docker/compose/docker-compose.yml`: 单实例Docker编排配置
+- `docker/compose/docker-compose.multi.yml`: 多实例Docker编排配置
+- `docker/sandbox/Dockerfile`: 生产者服务镜像构建（含VNC/noVNC）
 
 ## 扩展性
 

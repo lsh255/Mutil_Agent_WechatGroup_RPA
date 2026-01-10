@@ -4,27 +4,27 @@
 
 | 文件/目录 | 用途 |
 |-----------|------|
-| [Dockerfile](./Dockerfile) | 生产环境基础镜像（分层设计） |
-| [Dockerfile.test](./Dockerfile.test) | 测试环境镜像（添加 FastAPI） |
-| [docker-compose.yml](./docker-compose.yml) | 生产单实例部署 |
-| [docker-compose.multi.yml](./docker-compose.multi.yml) | 生产多实例部署（3 个实例） |
-| [docker-compose.test.yml](./docker-compose.test.yml) | 测试单实例部署（含 FastAPI） |
-| [start_wechat.sh](./start_wechat.sh) | 微信沙箱启动脚本（Xvfb、Fluxbox、noVNC、WeChat） |
+| [docker/sandbox/Dockerfile](../../docker/sandbox/Dockerfile) | 生产环境基础镜像（分层设计） |
+| [docker/sandbox/Dockerfile.test](../../docker/sandbox/Dockerfile.test) | 测试环境镜像（添加 FastAPI） |
+| [docker/compose/docker-compose.yml](../../docker/compose/docker-compose.yml) | 生产单实例部署 |
+| [docker/compose/docker-compose.multi.yml](../../docker/compose/docker-compose.multi.yml) | 生产多实例部署（3 个实例） |
+| [docker/compose/docker-compose.sandbox.test.yml](../../docker/compose/docker-compose.sandbox.test.yml) | 测试单实例部署（含 FastAPI） |
+| [main.py](./main.py) | 主启动脚本 |
+| [backup_start.py](./backup_start.py) | 备用启动脚本 |
+| [docker/scripts/start_wechat.sh](../../docker/scripts/start_wechat.sh) | 微信沙箱启动脚本（Xvfb、Fluxbox、noVNC、WeChat） |
+| [docker/scripts/start_wechat_sandbox.bat](../../docker/scripts/start_wechat_sandbox.bat) | Windows 启动脚本 |
 | [requirements.txt](./requirements.txt) | Python 依赖列表 |
-| [producer_service/](./producer_service/) | 生产者服务核心模块（消息监控、提取、分类） |
-| [producer_service/api_server.py](./producer_service/api_server.py) | FastAPI 服务器（SSE 流、健康检查、管理 API） |
-| [producer_service/producer1_observer.py](./producer_service/producer1_observer.py) | 生产者1：消息观察者（监控、检测气泡） |
-| [producer_service/producer2_content_fetcher.py](./producer_service/producer2_content_fetcher.py) | 生产者2：内容获取者（点击、提取文本/媒体） |
-| [producer_service/queue_manager.py](./producer_service/queue_manager.py) | Redis Stream 队列管理器 |
-| [producer_service/monitor.py](./producer_service/monitor.py) | 视觉监控器（定位微信窗口、截屏） |
-| [producer_service/detector.py](./producer_service/detector.py) | 变化检测器（dHash、气泡检测） |
-| [producer_service/classifier.py](./producer_service/classifier.py) | 消息类型分类器（文本/图片/视频/链接） |
-| [producer_service/extractor.py](./producer_service/extractor.py) | 精确内容获取器（双击复制、点击打开媒体） |
-| [producer_service/monitor.py](./producer_service/monitor.py) | 监控服务（Redis 队列监控） |
-| [app/](./app/) | FastAPI 应用入口 |
-| [static/](./static/) | 静态资源（Web 管理界面） |
-| [tests/](./tests/) | 单元测试和集成测试 |
+| [api/](./api/) | API 模块（FastAPI 应用、路由、配置管理） |
+| [core/](./core/) | 核心业务逻辑模块（消息监控、提取、分类、队列管理） |
+| [core/detector/](./core/detector/) | 变化检测模块（dHash、气泡检测、屏幕变化） |
+| [core/extractor/](./core/extractor/) | 内容提取模块（文本提取、媒体截图） |
+| [core/producer/](./core/producer/) | 生产者模块（Observer、ContentFetcher、AgentConsumer） |
+| [core/queue/](./core/queue/) | Redis Stream 队列管理 |
+| [core/classifier/](./core/classifier/) | 消息类型分类器（文本/图片/视频/链接） |
+| [core/platform/](./core/platform/) | 平台适配模块（跨平台支持） |
 | [utils/](./utils/) | 工具模块（配置、日志） |
+| [tests/](./tests/) | 单元测试和集成测试 |
+| [services/](./services/) | 服务模块 |
 | [archive/](./archive/) | 归档文件 |
 
 ## 准备工作
@@ -48,9 +48,7 @@ ls fonts-noto-cjk_20240730+repack1-1_all.deb
 ### 构建生产环境基础镜像
 
 ```bash
-cd services/wechat_sandbox
-
-docker build -f Dockerfile -t wechat_sandbox:latest .
+docker build -f docker/sandbox/Dockerfile -t wechat_sandbox:latest .
 ```
 
 ### 构建说明
@@ -64,16 +62,14 @@ docker build -f Dockerfile -t wechat_sandbox:latest .
 ### 1. 构建测试镜像
 
 ```bash
-cd services/wechat_sandbox
-
 # Dockerfile.test 继承自 wechat_sandbox:latest，添加 FastAPI 支持
-docker build -f Dockerfile.test -t wechat_sandbox-test:latest .
+docker build -f docker/sandbox/Dockerfile.test -t wechat_sandbox-test:latest .
 ```
 
 ### 2. 启动测试环境
 
 ```bash
-docker-compose -f docker-compose.test.yml up -d
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml up -d
 ```
 
 ### 3. 访问服务
@@ -81,13 +77,15 @@ docker-compose -f docker-compose.test.yml up -d
 - **noVNC Web 界面**: http://localhost:6080
 - **VNC 客户端**: localhost:5900（密码: wechat123）
 - **FastAPI 文档**: http://localhost:8000/docs
-- **健康检查**: http://localhost:8000/health
+- **健康检查**: http://localhost:8000/api/health
+- **服务状态**: http://localhost:8000/api/status
+- **SSE 消息流**: http://localhost:8000/api/stream
 - **Redis**: localhost:6379
 
 ### 4. 停止测试环境
 
 ```bash
-docker-compose -f docker-compose.test.yml down
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml down
 ```
 
 ## 生产环境部署
@@ -95,9 +93,7 @@ docker-compose -f docker-compose.test.yml down
 ### 单实例部署
 
 ```bash
-cd services/wechat_sandbox
-
-docker-compose up -d
+docker-compose -f docker/compose/docker-compose.yml up -d
 ```
 
 **访问地址**:
@@ -108,9 +104,7 @@ docker-compose up -d
 ### 多实例部署
 
 ```bash
-cd services/wechat_sandbox
-
-docker-compose -f docker-compose.multi.yml up -d
+docker-compose -f docker/compose/docker-compose.multi.yml up -d
 ```
 
 **访问地址**:
@@ -154,49 +148,49 @@ VNC 密码: vnc123
 ### 查看容器状态
 ```bash
 # 测试环境
-docker-compose -f docker-compose.test.yml ps
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml ps
 
 # 生产单实例
-docker-compose ps
+docker-compose -f docker/compose/docker-compose.yml ps
 
 # 生产多实例
-docker-compose -f docker-compose.multi.yml ps
+docker-compose -f docker/compose/docker-compose.multi.yml ps
 ```
 
 ### 查看日志
 ```bash
 # 测试环境
-docker-compose -f docker-compose.test.yml logs -f
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml logs -f
 
 # 生产单实例
-docker-compose logs -f
+docker-compose -f docker/compose/docker-compose.yml logs -f
 
 # 生产多实例
-docker-compose -f docker-compose.multi.yml logs -f
+docker-compose -f docker/compose/docker-compose.multi.yml logs -f
 ```
 
 ### 重启服务
 ```bash
 # 测试环境
-docker-compose -f docker-compose.test.yml restart
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml restart
 
 # 生产单实例
-docker-compose restart
+docker-compose -f docker/compose/docker-compose.yml restart
 
 # 生产多实例
-docker-compose -f docker-compose.multi.yml restart
+docker-compose -f docker/compose/docker-compose.multi.yml restart
 ```
 
 ### 停止服务
 ```bash
 # 测试环境
-docker-compose -f docker-compose.test.yml down
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml down
 
 # 生产单实例
-docker-compose down
+docker-compose -f docker/compose/docker-compose.yml down
 
 # 生产多实例
-docker-compose -f docker-compose.multi.yml down
+docker-compose -f docker/compose/docker-compose.multi.yml down
 ```
 
 ### 进入容器
@@ -229,6 +223,7 @@ docker exec -it wechat_producer_service_3 bash
 1. 检查端口映射是否正确
 2. 查看容器日志确认服务是否启动
 3. 检查 Redis 连接是否正常
+4. 确认 API 路由前缀是否正确（/api/）
 
 ### Redis 连接失败
 1. 确认 Redis 容器已启动：`docker ps | grep redis`
