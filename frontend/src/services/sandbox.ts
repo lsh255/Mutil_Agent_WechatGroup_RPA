@@ -41,28 +41,31 @@ export interface LogsRequest {
   since?: number
 }
 
-export async function getSandboxInstances(): Promise<SandboxListResponse> {
+export async function getSandboxInstances(): Promise<SandboxInstance[]> {
   const response = await api.get(`${SANDBOX_API_BASE}/instances`)
   return response.data
 }
 
-export async function getInstanceStatus(instanceId: string): Promise<SandboxInstance> {
-  const response = await api.get(`${SANDBOX_API_BASE}/instances/${instanceId}`)
+export async function getInstanceStatus(userId: string = 'default'): Promise<SandboxInstance> {
+  const response = await api.get(`${SANDBOX_API_BASE}/status/${userId}`)
   return response.data
 }
 
 export async function startInstance(request: StartInstanceRequest): Promise<SandboxInstance> {
-  const response = await api.post(`${SANDBOX_API_BASE}/instances/start`, request)
+  const userId = request.userId || 'default'
+  const response = await api.post(`${SANDBOX_API_BASE}/start/${userId}`)
   return response.data
 }
 
 export async function stopInstance(request: StopInstanceRequest): Promise<SandboxInstance> {
-  const response = await api.post(`${SANDBOX_API_BASE}/instances/stop`, request)
+  const userId = 'default'
+  const response = await api.post(`${SANDBOX_API_BASE}/stop/${userId}`)
   return response.data
 }
 
 export async function restartInstance(request: StopInstanceRequest): Promise<SandboxInstance> {
-  const response = await api.post(`${SANDBOX_API_BASE}/instances/restart`, request)
+  const userId = 'default'
+  const response = await api.post(`${SANDBOX_API_BASE}/restart/${userId}`)
   return response.data
 }
 
@@ -72,14 +75,12 @@ export async function getROIConfig(instanceId: string): Promise<ROIConfig> {
 }
 
 export async function updateROIConfig(request: UpdateROIRequest): Promise<ROIConfig> {
-  const response = await api.put(`${SANDBOX_API_BASE}/instances/${request.instanceId}/roi`, {
-    roi: request.roi
-  })
+  const response = await api.post(`${SANDBOX_API_BASE}/roi`, request.roi)
   return response.data
 }
 
 export async function takeScreenshot(request: ScreenshotRequest): Promise<ScreenshotResponse> {
-  const response = await api.get(`${SANDBOX_API_BASE}/instances/${request.instanceId}/screenshot`, {
+  const response = await api.get(`${SANDBOX_API_BASE}/screenshot`, {
     params: {
       format: request.format || 'png'
     },
@@ -89,7 +90,7 @@ export async function takeScreenshot(request: ScreenshotRequest): Promise<Screen
 }
 
 export async function getLogs(request: LogsRequest): Promise<LogEntry[]> {
-  const response = await api.get(`${SANDBOX_API_BASE}/instances/${request.instanceId}/logs`, {
+  const response = await api.get(`${SANDBOX_API_BASE}/logs`, {
     params: {
       level: request.level || 'all',
       limit: request.limit || 100,

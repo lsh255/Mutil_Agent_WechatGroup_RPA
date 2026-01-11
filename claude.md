@@ -9,7 +9,7 @@
 ## 目录结构
 ```
 Mutil_Agent_WechatGroup_RPA/
-├── agents/              # 智能体模块（IntentAgent、VisualAgent、DecisionAgent、MonitorAgent）
+├── agents/              # 智能体模块（IntentAgent、VisualAgent、DecisionAgent、SandboxManagerAgent、SSEProcessorAgent）
 ├── config/              # 配置管理（settings.py、settings.yaml）
 ├── core/                # 核心业务逻辑（LangGraph工作流、状态定义）
 │   ├── workflows/       # LangGraph工作流定义
@@ -103,12 +103,40 @@ Entry → monitor → multimodal → state_tracker → document → END
 - 登录引导：微信扫码登录阶段返回交互层，引导用户打开VNC界面
 - WebSocket通信：意图反馈、沙盒登录引导、状态监控
 
+### 智能体模块层设计（2025-01-11更新）
+- 单Agent模式：IntentAgent、VisualAgent、DecisionAgent、SandboxManagerAgent、SSEProcessorAgent
+- 多Agent模式：SandboxAuthAgent、UserFeedbackAgent、TrackerAgent、ConstellationAgent
+- 智能体解耦：MonitorAgent已拆分为SandboxManagerAgent（容器管理）和SSEProcessorAgent（SSE处理）
+- DAG任务图：使用UFO Constellation模式，支持动态任务分解和依赖管理
+
+### 智能体职责约定
+- SandboxManagerAgent：仅负责容器生命周期管理，不处理消息流
+- SSEProcessorAgent：仅负责SSE流处理（接收/验证/消费/转发），不管理容器
+- 其他Agent：专注于各自的业务逻辑，保持职责单一
+
 ## 历史决策记录
 
-### MonitorAgent功能混杂问题（2025-01-11）
-- 问题描述：MonitorAgent同时负责容器管理和消息消费，职责不清
-- 决策：需要将MonitorAgent拆分为独立的容器管理服务和流消费服务
-- 影响：涉及services/monitor_agent.py重构，新增services/sandbox_manager和services/stream_consumer
+### 前端管理员监控界面实现（2025-01-11）
+- 问题描述：管理员无法从前端实时监控微信沙盒容器状态和工作流运行状态
+- 决策：实现前端管理员监控界面SandboxMonitor
+  - 前端组件：SandboxMonitor.tsx提供实例监控、远程桌面、容器操作、ROI配置、实时日志、服务状态
+  - 后端API：sandbox_service.py提供REST API接口（instances/status/start/stop/restart/logs/roi/screenshot）
+  - Agent集成：SandboxManagerAgent负责容器生命周期管理
+- 影响：
+  - 新增frontend/src/pages/admin/components/SandboxMonitor.tsx
+  - 新增frontend/src/services/sandbox.ts前端服务层
+  - 新增services/sandbox_service.py后端API服务
+  - 更新架构设计文档v3.md添加9.1节前端管理员监控界面
+
+### MonitorAgent解耦为SandboxManagerAgent和SSEProcessorAgent（2025-01-11）
+- 问题描述：原MonitorAgent同时负责容器管理和消息消费，职责混杂，难以独立扩展
+- 决策：将MonitorAgent解耦为两个独立智能体
+  - SandboxManagerAgent：负责容器生命周期管理（创建/启动/停止/删除/健康检查）
+  - SSEProcessorAgent：负责SSE流处理（接收/验证/消费/转发）
+- 影响：
+  - 新增agents/sandbox_manager_agent.py和agents/sse_processor_agent.py
+  - 更新架构设计文档v3.md中的智能体定义和DAG任务图
+  - 架构设计文档v3.md中的所有MonitorAgent引用已替换为SandboxManagerAgent/SSEProcessorAgent
 
 ### LangGraph单Agent到多Agent演进（2025-01-11）
 - 问题描述：当前单Agent架构无法支持前端用户交互、微信登录引导、多群聊监控等复杂场景
@@ -128,11 +156,11 @@ Entry → monitor → multimodal → state_tracker → document → END
 
 ## 当前架构痛点
 
-1. **MonitorAgent职责混杂**：容器管理 + 消息消费耦合，难以独立扩展
+1. ~~**MonitorAgent职责混杂**：容器管理 + 消息消费耦合，难以独立扩展~~（已解决：解耦为SandboxManagerAgent和SSEProcessorAgent）
 2. **单Agent限制**：无法支持前端用户交互、微信登录引导、多群聊监控
 3. **微信界面变动适配**：双生产者架构依赖固定界面区域，界面变动会导致采集失败
 4. **用户交互缺失**：微信登录需要用户扫码，但没有交互层支持
-5. **前端监控缺失**：无法实时监控微信沙盒和工作流运行状态
+5. ~~**前端监控缺失**：无法实时监控微信沙盒和工作流运行状态~~（已解决：实现前端管理员监控界面SandboxMonitor）
 
 ## 演进目标
 

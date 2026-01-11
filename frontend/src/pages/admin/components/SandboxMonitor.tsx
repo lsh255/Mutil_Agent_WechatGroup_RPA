@@ -2,6 +2,15 @@ import { useState, useEffect, useRef } from 'react'
 import { Play, Square, RefreshCw, ExternalLink, Monitor, Settings, AlertCircle, CheckCircle2, XCircle, Minimize2 } from 'lucide-react'
 import { useSandboxStore } from '@/store/sandboxStore'
 import { useToast } from '@/hooks/use-toast'
+import {
+  getSandboxInstances,
+  startInstance,
+  stopInstance,
+  restartInstance,
+  updateROIConfig,
+  takeScreenshot,
+  getLogs
+} from '@/services/sandbox'
 
 interface ROIConfig {
   left: number
@@ -48,8 +57,7 @@ export default function SandboxMonitor() {
   useEffect(() => {
     const fetchInstances = async () => {
       try {
-        const response = await fetch('/api/sandbox/instances')
-        const data = await response.json()
+        const data = await getSandboxInstances()
         setInstances(data)
       } catch (error) {
         console.error('Failed to fetch sandbox instances:', error)
@@ -65,8 +73,7 @@ export default function SandboxMonitor() {
   useEffect(() => {
     const fetchLogs = async () => {
       try {
-        const response = await fetch('/api/sandbox/logs')
-        const data = await response.json()
+        const data = await getLogs({ instanceId: selectedInstance || 'default', limit: 100 })
         setLogs(data)
       } catch (error) {
         console.error('Failed to fetch logs:', error)
@@ -77,11 +84,11 @@ export default function SandboxMonitor() {
     const interval = setInterval(fetchLogs, 2000)
 
     return () => clearInterval(interval)
-  }, [])
+  }, [selectedInstance])
 
   const handleStart = async (id: string) => {
     try {
-      await fetch(`/api/sandbox/start/${id}`, { method: 'POST' })
+      await startInstance({ instanceId: id })
       updateInstance(id, { status: 'running' })
       toast({ title: '启动成功', description: `实例 ${id} 已启动` })
     } catch (error) {
@@ -92,7 +99,7 @@ export default function SandboxMonitor() {
 
   const handleStop = async (id: string) => {
     try {
-      await fetch(`/api/sandbox/stop/${id}`, { method: 'POST' })
+      await stopInstance({ instanceId: id })
       updateInstance(id, { status: 'stopped' })
       toast({ title: '停止成功', description: `实例 ${id} 已停止` })
     } catch (error) {
@@ -103,7 +110,7 @@ export default function SandboxMonitor() {
 
   const handleRestart = async (id: string) => {
     try {
-      await fetch(`/api/sandbox/restart/${id}`, { method: 'POST' })
+      await restartInstance({ instanceId: id })
       updateInstance(id, { status: 'running' })
       toast({ title: '重启成功', description: `实例 ${id} 已重启` })
     } catch (error) {
@@ -114,16 +121,8 @@ export default function SandboxMonitor() {
 
   const handleUpdateROI = async () => {
     try {
-      const response = await fetch('/api/sandbox/roi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(roiConfig),
-      })
-      if (response.ok) {
-        toast({ title: '配置已更新', description: '监控区域配置已保存' })
-      } else {
-        toast({ title: '配置更新失败', variant: 'destructive' })
-      }
+      await updateROIConfig({ instanceId: selectedInstance || 'default', roi: roiConfig })
+      toast({ title: '配置已更新', description: '监控区域配置已保存' })
     } catch (error) {
       console.error('Failed to update ROI:', error)
       toast({ title: '配置更新失败', variant: 'destructive' })
@@ -132,9 +131,9 @@ export default function SandboxMonitor() {
 
   const handleCaptureScreen = async () => {
     try {
-      const response = await fetch('/api/sandbox/screenshot')
-      if (response.ok) {
-        const blob = await response.blob()
+      const response = await takeScreenshot({ instanceId: selectedInstance || 'default' })
+      if (response) {
+        const blob = new Blob([response], { type: 'image/png' })
         const url = URL.createObjectURL(blob)
         window.open(url, '_blank')
         toast({ title: '截屏成功' })
@@ -149,12 +148,14 @@ export default function SandboxMonitor() {
 
   const handleRefreshScreenshot = async () => {
     try {
-      const response = await fetch('/api/sandbox/screenshot')
-      if (response.ok) {
-        const blob = await response.blob()
+      const response = await takeScreenshot({ instanceId: selectedInstance || 'default' })
+      if (response) {
+        const blob = new Blob([response], { type: 'image/png' })
         const url = URL.createObjectURL(blob)
         setScreenshotUrl(url)
         toast({ title: '截图已刷新' })
+      } else {
+        toast({ title: '截图刷新失败', variant: 'destructive' })
       }
     } catch (error) {
       console.error('Failed to refresh screenshot:', error)
@@ -164,18 +165,10 @@ export default function SandboxMonitor() {
 
   const handleSaveROI = async () => {
     try {
-      const response = await fetch('/api/sandbox/roi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentROI),
-      })
-      if (response.ok) {
-        setRoiConfig(currentROI)
-        setIsROIModalOpen(false)
-        toast({ title: 'ROI配置已保存' })
-      } else {
-        toast({ title: '保存失败', variant: 'destructive' })
-      }
+      await updateROIConfig({ instanceId: selectedInstance || 'default', roi: currentROI })
+      setRoiConfig(currentROI)
+      setIsROIModalOpen(false)
+      toast({ title: 'ROI配置已保存' })
     } catch (error) {
       console.error('Failed to save ROI:', error)
       toast({ title: '保存失败', variant: 'destructive' })
