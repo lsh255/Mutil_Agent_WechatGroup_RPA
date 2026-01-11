@@ -1,16 +1,35 @@
 # 多模态Agent微信群自动化项目 (LangGraph版)
 
-基于LangGraph的有状态多模态Agent自动化系统，用于监控微信工作群消息，理解图文混合内容，跟踪任务状态，并自动更新台账和生成工作报告。
+基于LangGraph的有状态多模态Agent自动化系统，采用UFO Constellation DAG任务分解模式，用于监控微信工作群消息，理解图文混合内容，跟踪任务状态，并自动更新台账和生成工作报告。
 
 ## 项目架构
 
-本项目采用"中心化工作流引擎 + 外围服务"的混合架构：
+本项目采用 **UFO Constellation DAG任务分解模式**，支持单Agent轻量模式和交互式多Agent扩展模式：
 
+- **UFO Constellation全局协调器**: 分解用户意图为动态DAG任务图，编排多智能体协作
 - **LangGraph工作流引擎**: 核心处理层，负责从消息理解到文档生成的全过程
 - **微信沙盒容器**: 独立的Docker化服务，提供微信客户端运行环境
 - **AI与知识库服务**: Ollama提供本地多模态模型，SiliconFlow提供云端Embedding模型，Chroma提供向量数据库
 - **协调中心**: FastAPI应用，提供管理界面和工作流触发接口
-- **前端管理界面**: React + TypeScript + Vite + Tailwind CSS，提供可视化的监控和管理功能
+- **前端管理界面**: React + TypeScript + Vite + Tailwind CSS，提供可视化的监控、管理和交互功能
+
+### 架构演进
+
+- **v2（原架构）**: Orchestrator-Worker（协调器-工作器）模式，单Agent工作流
+- **v3（新架构）**: UFO Constellation模式，动态DAG任务分解，支持多Agent交互和前端用户交互
+
+### 核心设计原则
+
+| 原则 | 说明 |
+|------|------|
+| 状态驱动 | LangGraph状态机驱动工作流流转 |
+| 异步解耦 | Redis Streams实现服务间解耦通信 |
+| 智能编排 | 多Agent协同处理复杂业务场景 |
+| 容错设计 | 检查点机制支持工作流恢复 |
+| DAG任务分解 | ConstellationAgent将用户意图分解为动态DAG任务图 |
+| 图演化机制 | 根据任务执行结果动态调整DAG结构 |
+| 向后兼容 | 保留原有单Agent工作流，支持轻量模式 |
+| 前端交互 | WebSocket实时通信，支持用户扫码登录和意图确认 |
 
 ### 微信沙盒架构
 
@@ -35,76 +54,174 @@
 ## 项目结构
 
 ```
-wechat-workflow-ai-agent/
-├── config/                          # 配置管理
-│   ├── settings.yaml                # 主配置文件
-│   └── settings.py                  # Pydantic配置类
-├── core/                            # 核心框架
+Mutil_Agent_WechatGroup_RPA/
+├── agents/                           # 智能体模块
+│   ├── prompts/                     # 智能体提示词
+│   │   ├── decision_prompts.py
+│   │   ├── intent_prompts.py
+│   │   └── visual_prompts.py
+│   ├── decision_agent.py            # 决策智能体
+│   ├── intent_agent.py              # 意图识别智能体
+│   ├── monitor_agent.py             # 监控智能体
+│   └── visual_agent.py              # 视觉定位智能体
+├── config/                           # 配置管理
+│   ├── settings.py                  # Pydantic配置类
+│   └── settings.yaml                # 配置文件
+├── core/                             # 核心业务逻辑
+│   ├── workflows/                    # LangGraph工作流
+│   │   ├── nodes/                   # 工作流节点
+│   │   │   ├── document_node.py     # 文档执行节点
+│   │   │   ├── monitor_node.py      # 监控节点
+│   │   │   ├── multimodal_node.py   # 多模态分析节点
+│   │   │   └── state_tracker_node.py # 状态跟踪节点
+│   │   └── main_workflow.py         # 主工作流
 │   ├── schemas.py                   # 数据模型定义
-│   ├── state.py                     # LangGraph状态定义
-│   └── workflows/                   # 工作流定义
-│       ├── main_workflow.py         # 主工作流
-│       └── nodes/                   # 工作流节点
-│           ├── monitor_node.py      # 监控节点
-│           ├── multimodal_node.py   # 多模态分析节点
-│           ├── state_tracker_node.py # 状态跟踪节点
-│           └── document_node.py     # 文档执行节点
-├── tools/                           # 工具层
-│   ├── excel_tool.py                # Excel更新工具
-│   └── word_tool.py                 # Word报告生成工具
-├── knowledge_base/                  # 知识库管理
+│   └── state.py                     # LangGraph状态定义
+├── docker/                           # Docker配置
+│   ├── base/                        # 基础镜像
+│   ├── compose/                     # Docker Compose配置
+│   │   ├── nginx/
+│   │   ├── docker-compose.dev.yml
+│   │   ├── docker-compose.multi.yml
+│   │   ├── docker-compose.prod.yml
+│   │   └── docker-compose.sandbox.test.yml
+│   ├── frontend/                    # 前端镜像
+│   ├── orchestrator/                # Orchestrator镜像
+│   ├── sandbox/                     # WeChat Sandbox镜像
+│   └── scripts/                     # 启动脚本
+├── docs/                             # 文档
+│   ├── ENVIRONMENT_INIT.md          # 环境初始化
+│   ├── ENVIRONMENT_SETUP.md         # 环境搭建
+│   ├── 架构设计文档v3.md            # 架构设计文档（UFO Constellation模式）
+│   ├── 技术栈文档v2.md              # 技术栈文档
+│   ├── 方案1.md                     # UFO Constellation DAG任务分解架构
+│   ├── 方案2.md                     # UFO AIP分层协作架构
+│   ├── 开发计划.md                  # 8周开发计划
+│   └── todolist.md                  # 任务清单
+├── frontend/                         # 前端应用
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── admin/               # 管理员页面
+│   │   │   └── chat/                # 聊天交互页面
+│   │   ├── store/                   # Zustand状态管理
+│   │   ├── services/                # API服务
+│   │   └── types/                   # TypeScript类型定义
+│   ├── package.json
+│   └── vite.config.ts
+├── knowledge_base/                   # 知识库管理
 │   ├── vector_store.py              # 向量存储管理
 │   └── embeddings.py                # 嵌入模型管理
-├── services/                        # 服务层
-│   ├── orchestrator/                # 协调中心
+├── scripts/                          # 部署脚本
+│   ├── create_excel_template.py     # 创建Excel模板
+│   ├── init_knowledge_base.py       # 初始化知识库
+│   ├── start_all.py                 # 启动所有服务
+│   └── test_workflow.py             # 测试工作流
+├── services/                         # 服务层
+│   ├── orchestrator/                # 协调中心服务
 │   │   └── main.py                  # FastAPI应用
-│   └── wechat_sandbox/              # 微信沙盒
+│   └── wechat_sandbox/              # 微信沙盒服务
 │       ├── api/                     # API接口层
 │       ├── core/                    # 核心业务逻辑层
 │       ├── services/                # 服务编排层
 │       ├── utils/                   # 工具模块
 │       ├── config.yaml              # 配置文件
 │       └── main.py                  # 统一入口脚本
-├── docker/                          # Docker相关配置（统一管理）
-│   ├── base/                        # 基础镜像
-│   ├── compose/                     # Docker Compose编排
-│   ├── frontend/                    # 前端镜像
-│   ├── orchestrator/                # 协调中心镜像
-│   ├── sandbox/                     # 微信沙盒镜像
-│   └── scripts/                     # 启动脚本
-├── agents/                          # Agent模块
-│   ├── decision_agent.py            # 决策Agent
-│   ├── intent_agent.py              # 意图识别Agent
-│   ├── monitor_agent.py             # 监控Agent
-│   ├── visual_agent.py              # 视觉Agent
-│   └── prompts/                     # Prompt模板
-├── frontend/                        # 前端应用
-│   ├── src/                         # 源代码
-│   ├── package.json                 # 依赖配置
-│   └── vite.config.ts               # Vite配置
-├── scripts/                         # 部署脚本
-│   ├── init_knowledge_base.py       # 初始化知识库
-│   └── start_all.py                 # 启动所有服务
-├── templates/                       # 模板文件
+├── templates/                        # 模板文件
 │   └── daily_report.j2              # 报告模板
-├── docs/                            # 文档
-│   ├── ENVIRONMENT_INIT.md          # 环境初始化
-│   └── ENVIRONMENT_SETUP.md         # 环境搭建
-├── pyproject.toml                   # 项目依赖配置
-└── requirements.txt                # Python依赖
+├── tools/                            # 工具层
+│   ├── excel_tool.py                # Excel更新工具
+│   └── word_tool.py                 # Word报告生成工具
+├── CLAUDE.md                         # 项目记忆文档
+├── pyproject.toml                    # 项目依赖配置
+└── requirements.txt                 # Python依赖
 ```
 
 ## 技术栈
 
-- **Python**: 3.12+
-- **LangGraph**: 0.0.50+ (工作流编排)
-- **LangChain**: 0.1.0+ (AI工具集成)
-- **FastAPI**: 0.104+ (Web框架)
-- **Ollama**: 本地AI模型服务 (Qwen3-VL)
-- **SiliconFlow**: 云AI模型服务 (Qwen3-Embedding)
-- **Chroma**: 向量数据库
-- **Redis**: 状态存储和缓存
-- **Docker**: 容器化部署
+### 核心框架层
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| LangGraph | >=0.0.50 | 工作流编排引擎，构建有状态多智能体系统 |
+| LangChain | >=0.1.0 | AI模型调用链、提示词管理、工具集成 |
+| LangChain-Community | >=0.0.10 | 集成ChatOllama等社区模型 |
+| LangChain-Chroma | >=0.1.0 | 向量数据库连接器 |
+
+### Web服务层
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| FastAPI | >=0.104.0 | HTTP服务框架，提供异步支持和自动API文档 |
+| Uvicorn | >=0.24.0 | ASGI服务器，运行FastAPI应用 |
+| Pydantic | >=2.5.0 | 数据验证、配置管理、API请求响应模型 |
+| Pydantic-Settings | >=2.1.0 | 多源配置管理（YAML + 环境变量） |
+| WebSocket | - | 前后端实时双向通信，用户交互反馈 |
+
+### 消息队列与状态管理
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Redis | >=7.2.0 | 消息持久化、分发、状态管理 |
+| Redis-Checkpointer | - | LangGraph状态持久化 |
+
+### AI模型层
+
+| 技术 | 用途 |
+|------|------|
+| ChatOllama (LangChain-Community) | 调用本地Ollama大语言模型 |
+| OpenAIEmbeddings (LangChain) | 文本向量化（兼容硅基流动API） |
+| Qwen3-VL-8B | 视觉语言模型，理解图文混合内容 |
+| Qwen3-Embedding-8B | 文本嵌入模型，用于RAG检索 |
+| Qwen3-72B | 大语言模型，用于意图识别和决策 |
+
+### 向量数据库层
+
+| 技术 | 用途 |
+|------|------|
+| ChromaDB | 向量数据库，存储知识库向量 |
+| Chroma (langchain-chroma) | LangChain与ChromaDB的集成 |
+
+### 图像处理与自动化
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| OpenCV-Python | >=4.8.0 | 图像处理、屏幕变化检测、气泡识别 |
+| Pillow | >=10.0.0 | 图像操作、截图处理 |
+
+### 文档操作层
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| openpyxl | >=3.1.0 | Excel文档读写和更新 |
+| python-docx | >=1.1.0 | Word文档生成 |
+| Jinja2 | >=3.1.0 | 模板引擎，报告渲染 |
+
+### 容器与编排层
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Docker (Python SDK) | >=7.0.0 | 容器生命周期管理 |
+| Docker Compose | - | 多容器编排 |
+
+### 日志与监控层
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| structlog | >=23.2.0 | 结构化日志生成 |
+| Prometheus-client | >=0.19.0 | 指标收集与暴露 |
+
+### 前端技术栈
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| React | 18.3+ | 前端框架 |
+| Vite | 5.4+ | 构建工具 |
+| TypeScript | 5.5+ | 类型安全开发 |
+| React Router | 6.26+ | 单页应用路由 |
+| Zustand | 4.5+ | 状态管理 |
+| Tailwind CSS | 3.4+ | CSS框架 |
+| Axios | 1.7.7 | HTTP客户端 |
+| Recharts | 2.12.7 | 图表库 |
 
 ## 快速开始
 
@@ -115,7 +232,6 @@ wechat-workflow-ai-agent/
 ```bash
 # 1. 创建并激活Conda环境
 conda create -n wechat-workflow-agent python=3.12
-
 
 # 2. 激活环境（如果需要）
 conda activate wechat-workflow-agent
@@ -198,10 +314,42 @@ python scripts/start_all.py
 
 系统通过LangGraph工作流处理每条微信消息：
 
+### 单Agent工作流（轻量模式）
+
+```
+monitor → multimodal → state_tracker → document → END
+```
+
 1. **Monitor Node**: 接收原始消息并载入工作流状态
 2. **Multimodal Node**: 调用Qwen3-VL模型进行图文理解，结合RAG检索增强上下文
 3. **StateTracker Node**: 更新任务状态，判断任务是否完成
 4. **Document Node**: 如果任务完成，调用工具更新Excel和生成Word报告
+
+### 多Agent交互工作流（扩展模式）
+
+```
+SandboxAuthAgent → MonitorAgent → MultimodalAgent → TrackerAgent → UserFeedbackAgent → DocumentAgent
+```
+
+1. **SandboxAuthAgent**: 检查微信沙盒容器状态和登录状态
+2. **MonitorAgent**: 接收原始消息并载入工作流状态
+3. **MultimodalAgent**: 调用Qwen3-VL模型进行图文理解，结合RAG检索增强上下文
+4. **TrackerAgent**: 更新任务状态，判断任务是否完成
+5. **UserFeedbackAgent**: 通过WebSocket与前端交互，接收用户反馈
+6. **DocumentAgent**: 如果任务完成，调用工具更新Excel和生成Word报告
+
+### UFO Constellation全局协调
+
+```
+用户请求 → 意图解析 → DAG生成 → 任务调度 → Agent执行 → 结果收集 → 任务完成
+```
+
+1. **意图解析**: ConstellationAgent识别用户意图类型
+2. **DAG生成**: DAGBuilder根据意图类型生成动态任务依赖图
+3. **任务调度**: 将DAG任务分发给对应的Agent执行
+4. **Agent执行**: 各Agent并行或串行执行任务
+5. **结果收集**: 收集各Agent执行结果
+6. **任务完成**: 判断所有任务完成，返回结果
 
 ## 配置说明
 
@@ -225,6 +373,10 @@ vector_store:
   type: "chroma"
   persist_directory: "./data/chroma_db"
   collection_name: "work_knowledge_base"
+
+workflow:
+  mode: "single"  # single: 单Agent模式 | multi: 多Agent模式
+  enable_frontend_interaction: false
 ```
 
 ## API接口
@@ -235,6 +387,10 @@ vector_store:
 - `GET /health`: 健康检查
 - `POST /workflow/trigger`: 触发工作流执行
 - `GET /workflow/status`: 获取工作流状态
+- `POST /constellation/request`: 接收用户请求，触发ConstellationAgent（多Agent模式）
+- `POST /constellation/feedback`: 接收前端用户反馈（多Agent模式）
+- `GET /constellation/status`: 获取DAG任务执行状态（多Agent模式）
+- `WebSocket /ws/{user_id}`: WebSocket连接，实时推送交互请求（多Agent模式）
 
 ## 测试
 
@@ -473,6 +629,21 @@ monitor:
 - **新增节点**: 在 `core/workflows/nodes/` 中创建新节点，并在 `main_workflow.py` 中注册
 - **新增工具**: 在 `tools/` 中创建新工具类
 - **更换消息源**: 实现 `IMessageSource` 接口，支持企业微信等平台
+- **新增Agent**: 在 `agents/` 中创建新Agent，并在 `core/workflows/` 中集成
+- **扩展前端交互**: 在 `frontend/src/` 中添加新的页面和组件
+
+## 文档
+
+项目文档位于 `docs/` 目录：
+
+- [环境初始化](docs/ENVIRONMENT_INIT.md): 环境搭建指南
+- [环境搭建](docs/ENVIRONMENT_SETUP.md): 详细环境配置
+- [架构设计文档v3.md](docs/架构设计文档v3.md): UFO Constellation架构设计
+- [技术栈文档v2.md](docs/技术栈文档v2.md): 技术栈详细说明
+- [方案1.md](docs/方案1.md): UFO Constellation DAG任务分解架构
+- [方案2.md](docs/方案2.md): UFO AIP分层协作架构
+- [开发计划.md](docs/开发计划.md): 8周开发计划
+- [todolist.md](docs/todolist.md): 任务清单
 
 ## 许可证
 
