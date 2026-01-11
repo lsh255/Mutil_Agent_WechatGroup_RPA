@@ -1,271 +1,149 @@
 # 项目记忆文档
 
 ## 项目基本信息
-- 项目名称：多模态Agent微信群自动化项目
-- 技术栈：Python, LangChain, LangGraph, FastAPI, Redis, Docker, OpenCV, mss, xdotool, xclip
-- 项目类型：多用户/多智能体系统
-- 创建时间：2025-01-10
+- 项目名称：多模态Agent微信群自动化项目（LangGraph版）
+- 技术栈：LangGraph 0.0.50+、LangChain 0.1.0+、FastAPI 0.104+、Redis 7.2+、ChromaDB 0.4.18+、Ollama（Qwen3系列模型）
+- 项目类型：单用户多群聊（MVP）→ 单用户多群聊映射 → 多用户场景
+- 创建时间：2025年
 
 ## 目录结构
 ```
 Mutil_Agent_WechatGroup_RPA/
-├── agents/                           # 统一的智能体模块目录（已重构）
-│   ├── intent_agent.py              # 意图识别智能体
-│   ├── visual_agent.py              # 视觉定位智能体
-│   ├── decision_agent.py            # 决策智能体
-│   ├── monitor_agent.py             # 监控智能体
-│   └── prompts/                     # 智能体提示词目录
-├── docker/                          # Docker相关配置（统一管理）
-│   ├── sandbox/                     # WeChat Sandbox Docker配置
-│   │   ├── Dockerfile               # 生产环境基础镜像
-│   │   ├── Dockerfile.test          # 测试环境镜像
-│   │   └── docker-compose.test.yml  # 测试环境编排
-│   ├── compose/                     # Docker Compose配置
-│   │   ├── docker-compose.yml       # 生产单实例部署
-│   │   ├── docker-compose.multi.yml # 生产多实例部署
-│   │   └── docker-compose.sandbox.test.yml # 沙箱测试环境
-│   ├── orchestrator/                # Orchestrator Docker配置
-│   ├── scripts/                     # 统一启动脚本目录
-│   │   ├── start_wechat.sh          # 微信沙箱启动脚本
-│   │   ├── start_wechat_sandbox.bat # Windows启动脚本
-│   │   └── start_sandbox.sh         # 通用沙箱启动脚本
-│   └── frontend/                    # Frontend Docker配置
-├── services/
-│   └── wechat_sandbox/              # 微信沙盒服务（业务代码和文档）
-│       ├── api/                     # API接口层
-│       ├── core/                    # 核心业务逻辑层
-│       ├── services/                # 服务编排层
-│       ├── utils/                   # 工具模块
-│       ├── tests/                   # 测试文件
-│       ├── archive/                 # 归档文件
-│       ├── README.md                # 项目总览
-│       ├── QUICKSTART.md            # 快速启动指南
-│       ├── ARCHITECTURE.md          # 架构说明
-│       ├── BUSINESS_LOGIC_TEST.md   # 测试指南
-│       ├── main.py                  # 服务入口
-│       ├── backup_start.py          # 备用启动脚本
-│       ├── config.yaml              # 配置文件
-│       ├── config.production.yaml   # 生产环境配置
-│       ├── requirements.txt         # Python依赖
-│       └── run_tests.py             # 测试运行脚本
-├── workflows/                        # 工作流定义
-│   └── main_workflow.py             # LangGraph主工作流
-├── utils/                           # 工具模块
-│   ├── logger.py                    # 日志工具
-│   └── config.py                    # 配置工具
-└── 多模态Agent微信群自动化项目：架构设计文档V2.md  # 官方架构文档
+├── agents/              # 智能体模块（IntentAgent、VisualAgent、DecisionAgent、MonitorAgent）
+├── config/              # 配置管理（settings.py、settings.yaml）
+├── core/                # 核心业务逻辑（LangGraph工作流、状态定义）
+│   ├── workflows/       # LangGraph工作流定义
+│   │   ├── nodes/      # 工作流节点
+│   │   └── main_workflow.py
+│   ├── schemas.py      # Pydantic数据模型
+│   └── state.py        # LangGraph状态定义
+├── docker/              # Docker配置（基础镜像、compose配置）
+├── docs/                # 项目文档
+├── frontend/            # React前端应用
+├── knowledge_base/      # Chroma向量数据库管理
+├── scripts/             # 部署、初始化脚本
+├── services/            # 服务模块
+│   ├── orchestrator/   # FastAPI协调中心
+│   └── wechat_sandbox/  # 微信沙盒（双生产者架构）
+└── pyproject.toml       # Python项目配置
 ```
 
 ## 开发规则（必须遵守）
 
-### 智能体模块规范
-- 所有智能体必须统一放在 `agents/` 目录下
-- 智能体必须遵循统一的类结构：
-  - `__init__`: 初始化配置和依赖
-  - `_build_chain`: 构建LangChain Runnable链
-  - `invoke`: 同步调用接口
-  - `ainvoke`: 异步调用接口
-- 智能体提示词统一放在 `agents/prompts/` 目录
-- 智能体禁止直接暴露为前端服务，必须通过LangGraph Orchestrator-Worker模式调用
-- 保持向后兼容性：保留原始 `invoke/ainvoke` 函数签名
+### LangGraph框架约束
+- 工作流使用StateGraph构建，状态定义必须继承TypedDict
+- 状态传递使用Annotated[list, add_messages]模式实现消息追加
+- 条件边使用add_conditional_edges实现工作流分支
+- 工作流检查点使用Redis Checkpointer实现状态持久化
 
-### wechat_sandbox服务规范
-- 采用双生产者架构：
-  - Producer1 (Observer): 检测消息气泡生成小截图
-  - Producer2 (ContentFetcher): 精确获取消息内容（文本/媒体）
-- 使用Redis Stream队列管理消息：
-  - 原始消息队列：存储小截图
-  - 精确消息队列：存储完整内容
-- SSE流式接口：`/stream` 端点向消费者推送消息
-- 消息锁定机制：使用 Redis SET NX 避免重复处理
-- ROI管理：支持多个监控区域（屏幕坐标）
+### 数据模型规范
+- 所有数据模型使用Pydantic 2.5+定义
+- 枚举类型使用Python enum.Enum
+- 时间字段使用datetime类型，序列化为ISO格式字符串
+- 图像路径使用相对路径（相对于data目录）
+
+### 消息处理规范
+- 原始消息结构：id、sender、content、type、timestamp、image_path
+- 消息类型枚举：TEXT、IMAGE、VIDEO、FILE、MIXED
+- 任务类型枚举：WORK_REPORT、TASK_ASSIGNMENT、STATUS_UPDATE、OTHER
+- 任务阶段枚举：BEFORE、DURING、AFTER、UNKNOWN
+
+### AI模型调用规范
+- 意图识别使用Qwen3-72B（temperature: 0.1, max_tokens: 100）
+- 视觉定位使用Qwen3-VL-8B（temperature: 0.1, max_tokens: 200）
+- Agent决策使用Qwen3-72B（temperature: 0.3, max_tokens: 300）
+- 嵌入使用Qwen3-Embedding-4B（用于ChromaDB RAG检索）
+
+### Redis使用规范
+- 消息队列使用Redis Streams，键名格式：wechat:messages:{raw|precise}
+- 状态存储使用Redis Hash，键名格式：state:{user_id}:{workflow_id}
+- 分布式锁使用Redis SET NX，键名格式：lock:{resource}:{user_id}
+- 过期时间：消息队列24小时、状态存储7天、分布式锁10分钟
 
 ### 日志规范
-- 使用项目统一的日志工具 `utils.logger.logger`
-- 日志级别选择：
-  - ERROR: 功能异常、需要人工介入（数据库连接失败、API调用异常）
-  - WARN: 潜在问题、但程序可继续（配置缺失用默认值、重试后成功）
-  - INFO: 关键业务节点（用户登录登出、订单状态变更、任务开始/结束）
-  - DEBUG: 调试信息（入参出参、SQL语句、缓存命中情况）
-- 必须添加日志的位置：
-  - try-catch 的 catch 块（logger.error）
-  - 外部调用前后（DEBUG → INFO/ERROR）
-  - 业务入口（INFO）
-  - 状态变更（INFO）
-  - 重要条件分支（DEBUG）
+- 使用structlog 23.2+生成结构化日志
+- 日志级别：ERROR（功能异常）、WARN（潜在问题）、INFO（关键业务节点）、DEBUG（调试信息）
+- 必须添加日志的位置：try-catch的catch块、外部调用前后、业务入口、状态变更、重要条件分支
 
 ## 架构约定
 
-### LangGraph多智能体架构
-- 采用 Orchestrator-Worker 模式
-- Orchestrator负责任务分发和协调
-- Worker（各类智能体）负责具体业务处理
-- 通过Redis Checkpoint机制实现状态持久化
+### Orchestrator-Worker架构模式
+- Orchestrator：LangGraph工作流引擎负责任务编排和状态管理
+- Worker：各功能节点（monitor、multimodal、state_tracker、document）专注特定领域处理
+- 通过LangGraph Send API动态创建和分发Worker任务
 
-### 智能体交互流程
-1. 用户意图识别 → IntentAgent
-2. 视觉定位 → VisualAgent（生成屏幕坐标）
-3. 沙盒启动 → Sandbox Launcher Node
-4. 消息监控 → wechat_sandbox服务
-5. 决策执行 → DecisionAgent
+### 状态流转设计
+```
+Entry → monitor → multimodal → state_tracker → document → END
+                                          ↓
+                                       (条件分支)
+                                    任务完成？
+                                    Yes → document
+                                    No → END
+```
 
-### 消息处理流程
-1. VisualMonitor 检测屏幕变化
-2. ChangeDetector 计算dHash识别新消息
-3. Classifier 分类消息类型（text/image/video）
-4. ContentFetcher 提取精确内容
-5. API Server 通过SSE推送消息
-6. Agent Consumer 接收并处理消息
+### 微信沙盒双生产者架构
+- Producer1（Observer）：检测气泡生成小截图，推送到原始队列
+- Producer2（ContentFetcher）：从原始队列消费，精确定位并提取内容，推送到精确队列
+- SSE流接口：/api/stream/messages流式推送精确消息
+
+### 多模态分析流程
+- MultimodalNode接收RawMessage，调用Qwen3-VL-8B分析图文内容
+- 分析结果：task_type（任务类型）、task_phase（任务阶段）、user（用户）、summary（摘要）、location（地点）
+- StateTrackerNode根据分析结果更新TaskStatus，判断任务是否完成
+
+### 文档执行流程
+- DocumentNode根据TaskStatus生成DocumentUpdate指令
+- 支持操作类型：write_report（写日报）、update_ledger（更新台账）、save_message（保存消息）
+- 日报按事项生成，台账按作业更新
+
+### 前端交互规范
+- 用户配置：今日工作安排（事项1、地点A、人员1、人员2）
+- 群聊监控：用户指定监控群聊名称
+- 登录引导：微信扫码登录阶段返回交互层，引导用户打开VNC界面
+- WebSocket通信：意图反馈、沙盒登录引导、状态监控
 
 ## 历史决策记录
 
-### 2025-01-10: 智能体模块统一
-**决策**: 将 `intent_recognition/`, `visual_locator/`, `agent_decision/` 统一到 `agents/` 目录
-**原因**: 
-- 避免模块分散，提高代码可维护性
-- 统一智能体接口规范，便于LangGraph集成
-- 避免直接暴露为前端服务，遵循微服务最佳实践
+### MonitorAgent功能混杂问题（2025-01-11）
+- 问题描述：MonitorAgent同时负责容器管理和消息消费，职责不清
+- 决策：需要将MonitorAgent拆分为独立的容器管理服务和流消费服务
+- 影响：涉及services/monitor_agent.py重构，新增services/sandbox_manager和services/stream_consumer
 
-**实施**:
-- 创建 `agents/prompts/` 目录迁移提示词文件
-- 将三个模块重构为统一的智能体类结构
-- 保持向后兼容性，保留原始函数签名
+### LangGraph单Agent到多Agent演进（2025-01-11）
+- 问题描述：当前单Agent架构无法支持前端用户交互、微信登录引导、多群聊监控等复杂场景
+- 决策：参考UFO³ Galaxy架构，设计基于LangGraph的多Agent协作架构
+- 需求：保留单Agent轻量性，引入多Agent扩展性，支持前端交互和用户协助
 
-### 2025-01-10: wechat_sandbox双生产者架构
-**决策**: 采用双生产者架构（Observer + ContentFetcher）
-**原因**:
-- 分离消息检测和内容获取，提高性能
-- 支持高并发场景下的消息处理
-- 降低单一生产者的负载压力
+### 消息时间地点逻辑关系处理（2025-01-11）
+- 业务逻辑：群成员A发消息"作业w1作业前"，群成员B发消息"作业w1作业中"，两者属于同一作业的不同阶段
+- 技术方案：StateTrackerNode维护TaskStatus，根据sender、task_id、task_phase关联消息
+- 实现方式：使用Redis存储任务状态，key格式：task:{user_id}:{task_id}:{work_id}
 
-**实施**:
-- Producer1: 检测消息气泡，生成小截图推送到原始队列
-- Producer2: 从原始队列消费，提取精确内容推送到精确队列
-- 使用Redis Stream XREADGROUP实现消费者组模式
+### 事项与作业的层级关系（2025-01-11）
+- 事项：用户配置的工作安排（事项1、事项2、事项3）
+- 作业：事项下的具体作业（w1、w2、w3）
+- 日志生成：按事项生成日报（包含该事项下所有作业）
+- 台账更新：按作业更新台账（作业前、作业中、作业后）
 
-### 2025-01-10: SSE流式传输
-**决策**: 使用Server-Sent Events (SSE)推送消息
-**原因**:
-- 实时性要求高，HTTP轮询效率低
-- 单向通信场景，SSE比WebSocket更轻量
-- 原生支持断线重连
+## 当前架构痛点
 
-**实施**:
-- FastAPI实现 `/stream` 端点
-- 使用 `asyncio.Queue` 和 `Event` 管理客户端连接
-- 支持多客户端并发连接
+1. **MonitorAgent职责混杂**：容器管理 + 消息消费耦合，难以独立扩展
+2. **单Agent限制**：无法支持前端用户交互、微信登录引导、多群聊监控
+3. **微信界面变动适配**：双生产者架构依赖固定界面区域，界面变动会导致采集失败
+4. **用户交互缺失**：微信登录需要用户扫码，但没有交互层支持
+5. **前端监控缺失**：无法实时监控微信沙盒和工作流运行状态
 
-### 2025-01-10: 平台适配层设计
-**决策**: 设计PlatformAdapter抽象层支持Windows/Linux跨平台
-**原因**:
-- 当前 `extractor.py` 仅支持Linux（xdotool/xclip）
-- 项目需要支持Windows环境下的微信客户端
-- 避免硬编码平台特定逻辑
+## 演进目标
 
-**实施**:
-- 创建 `core/platform/adapter.py`
-- 定义抽象接口：`click_mouse`, `double_click`, `copy_to_clipboard`, `get_clipboard`
-- 实现Linux适配器（xdotool/xclip）
-- 实现Windows适配器（pywin32/ctypes）
-- 工厂模式根据操作系统选择适配器
+### 阶段一：单Agent架构（当前）
+- 核心功能：多模态分析、任务状态跟踪、文档执行
+- 限制：无前端交互、单群聊监控、固定界面区域
 
-### 2025-01-10: wechat_sandbox目录结构重构（方案一）
-**决策**: 采用方案一重构 `wechat_sandbox` 目录结构
-**原因**:
-- 原目录结构杂乱，`app/` 和 `producer_service/` 职责不清晰
-- 核心业务逻辑分散，难以维护
-- 缺乏清晰的功能分层
+### 阶段二：多Agent协作（目标）
+- 核心功能：用户交互Agent、容器管理Agent、消息消费Agent、任务编排Agent
+- 扩展：支持多群聊监控、动态界面适配、前端实时监控
 
-**新目录结构**:
-```
-wechat_sandbox/
-├── api/                           # API接口层
-│   ├── __init__.py               # FastAPI应用入口（统一路由注册）
-│   ├── config.py                 # 配置管理路由
-│   ├── instance.py               # 服务实例管理路由
-│   ├── stream.py                 # SSE流式接口
-│   └── health.py                 # 健康检查接口
-├── core/                          # 核心业务逻辑层
-│   ├── producer/                 # 消息生产者
-│   │   ├── monitor.py            # 视觉监控器
-│   │   ├── observer.py           # 消息气泡观察者
-│   │   └── content_fetcher.py    # 精确内容获取器
-│   ├── queue/                    # Redis队列管理
-│   │   └── manager.py
-│   ├── detector/                 # 变化检测与边界识别
-│   │   └── detector.py
-│   ├── extractor/                # 消息内容提取
-│   │   └── extractor.py
-│   ├── classifier/               # 消息类型分类
-│   │   └── classifier.py
-│   └── platform/                 # 跨平台适配层
-│       └── adapter.py
-├── services/                      # 服务编排层
-│   └── producer_service.py       # 生产者服务编排
-├── utils/                         # 工具模块
-│   ├── logger.py
-│   └── config.py
-├── config.yaml                    # 配置文件
-└── main.py                        # 统一入口脚本
-```
-
-**实施**:
-- 创建备份目录 `wechat_sandbox.backup/`
-- 新建 `api/` 目录迁移所有API路由
-- 新建 `core/` 目录迁移核心业务逻辑（按功能划分子目录）
-- 新建 `services/` 目录实现服务编排层
-- 重写 `main.py` 使用新的目录结构
-- 更新 `Dockerfile` 和测试文件
-
-**关键改进**:
-- 清晰的分层架构（API → Services → Core）
-- 按功能组织核心逻辑，提高可维护性
-- 统一的入口点（`api/__init__.py` 注册所有路由）
-- 服务编排层统一管理组件生命周期
-
-### 2025-01-10: Docker和启动脚本统一管理
-**决策**: 将Docker相关文件和启动脚本从 `wechat_sandbox/` 迁移到 `docker/` 统一管理
-**原因**:
-- Docker配置和启动脚本是基础设施，不属于业务代码
-- 避免业务代码目录杂乱，提高可维护性
-- 便于跨服务复用Docker配置
-- 符合微服务最佳实践：基础设施与业务代码分离
-
-**实施**:
-- 迁移Docker文件到 `docker/sandbox/`：
-  - `Dockerfile` - 生产环境基础镜像
-  - `Dockerfile.test` - 测试环境镜像
-  - `docker-compose.test.yml` - 测试环境编排
-- 迁移Docker Compose文件到 `docker/compose/`：
-  - `docker-compose.yml` - 生产单实例部署
-  - `docker-compose.multi.yml` - 生产多实例部署
-  - `docker-compose.sandbox.test.yml` - 沙箱测试环境
-- 迁移启动脚本到 `docker/scripts/`：
-  - `start_wechat.sh` - 微信沙箱启动脚本
-  - `start_wechat_sandbox.bat` - Windows启动脚本
-  - `start_sandbox.sh` - 通用沙箱启动脚本
-- 保留配置文件在 `services/wechat_sandbox/`：
-  - `config.yaml` - WeChat特定配置，与业务代码紧密相关
-  - `config.production.yaml` - 生产环境配置
-- 保留文档文件在 `services/wechat_sandbox/`：
-  - `README.md` - 项目总览
-  - `QUICKSTART.md` - 快速启动指南
-  - `ARCHITECTURE.md` - 架构说明
-  - `BUSINESS_LOGIC_TEST.md` - 测试指南
-- 删除 `CONTEXT.md`（与 README.md 内容重复）
-
-**关键改进**:
-- 基础设施与业务代码分离，职责更清晰
-- Docker配置集中管理，便于版本控制和复用
-- 启动脚本统一目录，避免散落在各处
-- 更新所有相关文档中的路径引用
-- 配置文件保留在业务目录，与代码紧密耦合
-
-## 技术栈版本约束
-- Python: 3.9+
-- LangChain: 使用requirements.txt中的指定版本
-- LangGraph: 使用requirements.txt中的指定版本
-- langchain-ollama: >=0.1.0
-- Redis: 6.0+
-- Docker: 20.10+
-- OpenCV: 4.5+
+### 阶段三：多用户场景（远期）
+- 核心功能：用户管理、数据隔离、多实例沙盒
+- 扩展：支持多用户并发访问、独立任务配置
