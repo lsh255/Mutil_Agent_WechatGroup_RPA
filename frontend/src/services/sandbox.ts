@@ -57,13 +57,13 @@ export async function startInstance(request: StartInstanceRequest): Promise<Sand
   return response.data
 }
 
-export async function stopInstance(request: StopInstanceRequest): Promise<SandboxInstance> {
+export async function stopInstance(_request: StopInstanceRequest): Promise<SandboxInstance> {
   const userId = 'default'
   const response = await api.post(`${SANDBOX_API_BASE}/stop/${userId}`)
   return response.data
 }
 
-export async function restartInstance(request: StopInstanceRequest): Promise<SandboxInstance> {
+export async function restartInstance(_request: StopInstanceRequest): Promise<SandboxInstance> {
   const userId = 'default'
   const response = await api.post(`${SANDBOX_API_BASE}/restart/${userId}`)
   return response.data

@@ -1,3 +1,53 @@
+# ============================================================
+# 开发环境 Docker Compose 编排文件
+# ============================================================
+#
+# 用途：开发环境的调试服务编排（依赖主编排文件）
+#
+# 使用方式：
+#   docker-compose -f docker/compose/docker-compose.yml \
+#                 -f docker/compose/docker-compose.dev.yml up -d
+#
+# 包含服务：
+#   - orchestrator: 协调中心 (调试模式)
+#       * 端口: 8000 (服务), 5678 (debugpy)
+#       * 支持热重载和远程调试
+#       * 挂载源码目录到容器
+#
+#   - frontend: React 前端 (开发模式)
+#       * 端口: 3000
+#       * 挂载 src 目录实现热更新
+#
+#   - wechat-sandbox: 微信沙盒 (调试模式)
+#       * 端口: 6080 (noVNC), 5900 (VNC), 8001 (API)
+#       * 挂载 services 目录便于调试
+#
+# 开发特性：
+#   - DEBUG=true 启用调试日志
+#   - 源码挂载实现代码热更新
+#   - orchestrator 支持 VSCode 远程调试
+#   - __pycache__ 排除避免缓存问题
+#
+# 使用方法：
+#   # 1. 启动开发环境
+#   docker-compose -f docker/compose/docker-compose.yml \
+#                 -f docker/compose/docker-compose.dev.yml up -d
+#
+#   # 2. 连接调试器 (VSCode)
+#    launch.json 配置:
+#    {
+#      "name": "Python: Remote Attach",
+#      "type": "debugpy",
+#      "request": "attach",
+#      "connect": {"host": "localhost", "port": 5678}
+#    }
+#
+#   # 3. 查看日志
+#   docker-compose -f docker/compose/docker-compose.yml \
+#                 -f docker/compose/docker-compose.dev.yml logs -f
+#
+# ============================================================
+
 version: '3.8'
 
 services:
@@ -55,9 +105,13 @@ services:
       - REDIS_DB=0
       - VNC_PASSWORD=vnc123
       - DEBUG=true
+      - TZ=Asia/Shanghai
+      - GNOME_ACCESSIBILITY=1
+      - QT_ACCESSIBILITY=1
+      - QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
     volumes:
-      - ./sandbox/media:/app/media
-      - ./sandbox/logs:/app/logs
+      - ../../services/wechat_sandbox/media:/app/media
+      - ../../services/wechat_sandbox/logs:/app/logs
       - ../../services/wechat_sandbox:/app/services:ro
     privileged: true
     cap_add:

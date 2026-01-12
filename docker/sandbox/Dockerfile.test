@@ -1,3 +1,54 @@
+# ============================================================
+# 微信沙盒测试镜像 Dockerfile
+# ============================================================
+#
+# 用途：构建带 AT-SPI 支持的测试环境镜像
+#
+# 基础镜像：wechat_sandbox:latest（由 Dockerfile 构建）
+#
+# 额外功能：
+#   - AT-SPI 辅助功能框架支持
+#   - pyatspi Python 库
+#   - Accerciser UI 调试工具
+#   - Qt6 AT-SPI 桥接
+#   - D-Bus 会话支持
+#   - xdotool 和 xclip（自动化工具）
+#
+# 环境变量：
+#   - QT_ACCESSIBILITY=1（启用 Qt 辅助功能）
+#   - GNOME_ACCESSIBILITY=1（启用 GNOME 辅助功能）
+#   - QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1（Qt 持续启用）
+#   - TZ=Asia/Shanghai（中国时区）
+#
+# 生成镜像：wechat_sandbox-test:latest
+#
+# 使用场景：
+#   - AT-SPI 混合方案测试
+#   - UI 控件树调试
+#   - 双生产者架构验证
+#   - 消息采集功能开发
+#
+# 使用的编排文件：
+#   - docker/compose/docker-compose.sandbox.test.yml
+#   - docker/sandbox/docker-compose.test.yml
+#
+# 构建方式：
+#   # 方式1：使用 docker-compose 构建
+#   docker-compose -f docker/compose/docker-compose.sandbox.test.yml build
+#
+#   # 方式2：直接构建
+#   docker build --build-arg BASE_IMAGE=wechat_sandbox:latest \
+#     -f docker/sandbox/Dockerfile.test \
+#     -t wechat_sandbox-test:latest \
+#     ../..
+#
+# 注意事项：
+#   - 必须先构建基础镜像 wechat_sandbox:latest
+#   - AT-SPI 功能需要微信应用支持辅助功能
+#   - 首次使用建议运行测试脚本验证
+#
+# ============================================================
+
 # 构建参数，指定基础镜像名称
 ARG BASE_IMAGE=wechat_sandbox:latest
 # 使用构建参数指定基础镜像
@@ -12,22 +63,40 @@ LABEL description="WeChat Sandbox with FastAPI for testing environment"
 ENV PYTHONUNBUFFERED=1
 # 设置 FastAPI 环境为测试
 ENV FASTAPI_ENV=testing
+# 开启 Qt6 AT-SPI 桥接功能，使 Qt 控件能通过 D-Bus 暴露给辅助功能框架
+ENV QT_ACCESSIBILITY=1
+# 设置时区为中国标准时间
+ENV TZ=Asia/Shanghai
+# 设置辅助功能环境变量
+ENV GNOME_ACCESSIBILITY=1
+ENV QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
 
-# 更新包列表并安装 Python 依赖
+# 更新包列表并安装 Python 依赖、x11 工具、Accerciser 依赖、D-Bus 和 Qt6 桥接
 RUN apt-get update && apt-get install -y --fix-missing \
     python3-pip \
     python3-dev \
+    xdotool \
+    xclip \
+    dbus-x11 \
+    at-spi2-core \
+    gir1.2-atspi-2.0 \
+    libatspi2.0-0 \
+    python3-pyatspi \
+    accerciser \
+    qt6-base-dev \
+    qt6-base-dev-tools \
+    libqt6gui6 \
+    libqt6widgets6 \
+    libqt6core6 \
+    tzdata \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && rm -rf /var/lib/apt/lists/*
 
+# 复制 requirements.txt
+COPY services/wechat_sandbox/requirements.txt /tmp/requirements.txt
+
 # 安装 Python 包（不使用缓存）
-RUN pip3 install --no-cache-dir \
-    fastapi==0.104.1 \
-    uvicorn[standard]==0.24.0 \
-    redis==5.0.1 \
-    pydantic==2.5.0 \
-    pydantic-settings==2.1.0 \
-    python-multipart==0.0.6 \
-    aiofiles==23.2.1
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
 # 设置工作目录为 /app
 WORKDIR /app
@@ -44,12 +113,21 @@ COPY services/wechat_sandbox/utils/ /app/utils/
 # 复制服务模块到容器
 COPY services/wechat_sandbox/services/ /app/services/
 
-# 复制主启动脚本到容器
+# 复制service主启动脚本到容器
 COPY services/wechat_sandbox/main.py /app/main.py
 
 # 复制微信启动脚本到容器
-COPY docker/scripts/start_wechat.sh /app/start_wechat.sh
+COPY docker/scripts/common/start_wechat.sh /app/start_wechat.sh
 RUN chmod +x /app/start_wechat.sh
+
+# 复制统一启动脚本到容器
+COPY docker/scripts/common/start_all.sh /app/start_all.sh
+RUN chmod +x /app/start_all.sh
+
+# 复制 AT-SPI 测试脚本到容器（可选）
+COPY docker/scripts/atspi/test_atspi_simple.py /app/test_atspi_simple.py
+COPY docker/scripts/atspi/test_atspi_solution.sh /app/test_atspi_solution.sh
+RUN chmod +x /app/test_atspi_solution.sh
 
 # 创建日志和媒体目录
 RUN mkdir -p /app/logs /app/media
@@ -60,5 +138,5 @@ EXPOSE 8000
 # 复制配置文件到容器
 COPY services/wechat_sandbox/config.yaml /app/config.yaml
 
-# 容器启动时执行主启动脚本
-CMD ["python3", "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# 容器启动时执行统一启动脚本（包含 VNC、FastAPI、AT-SPI、WeChat、Accerciser）
+CMD ["/app/start_all.sh"]

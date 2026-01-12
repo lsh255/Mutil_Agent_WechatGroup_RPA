@@ -1,305 +1,494 @@
-# WeChat 沙箱项目
+# WeChat 沙箱服务
 
 ## 概述
 
-这是一个基于 Linux 微信的沙盒容器，用于本地测试和开发微信自动化功能。项目采用 Docker 容器化部署，支持多实例部署，并内置双生产者架构实时提取和转发群聊消息。
+微信沙盒服务是基于 Linux 微信的容器化消息采集系统，支持多种消息采集方案：
+
+### 数据采集方案
+
+1. **AT-SPI 混合方案**（推荐）
+   - 主要方案：AT-SPI UI控件监听
+   - 兜底方案：视觉技术（自动降级）
+   - 优势：速度快、资源占用少、准确率高
+
+2. **双生产者架构**（传统方案）
+   - Producer1 (Observer): 检测消息气泡
+   - Producer2 (ContentFetcher): 提取精确内容
+   - 优势：兼容性好、适用场景广
+
+### 功能特性
+
+- ✅ 实时消息采集（文本、图片、视频、链接）
+- ✅ SSE 实时推送
+- ✅ Redis Stream 队列
+- ✅ FastAPI REST 接口
+- ✅ 多实例部署支持
+- ✅ AT-SPI 辅助功能集成
 
 ## 前置要求
 
-1. Docker 已安装并运行
-2. Linux 微信安装包已放置在项目 build 目录：`build/WeChatLinux_x86_64.deb`
+### 基础环境
+- **Docker**: 20.10+
+- **Redis**: 7.2+
+- **Python**: 3.10+
 
-## 目录结构说明
+### 构建依赖
+- Linux 微信安装包: `build/WeChatLinux_x86_64.deb`
+- 中文字体包: `build/fonts-noto-cjk_20240730+repack1-1_all.deb`
 
-### 核心 Dockerfile
+### AT-SPI 环境（可选）
+- 环境变量：`QT_ACCESSIBILITY=1`, `GNOME_ACCESSIBILITY=1`
+- 依赖：pyatspi, at-spi2-core
+- 工具：Accerciser（调试工具）
 
-| 文件 | 用途 | 基础镜像 |
-|------|------|----------|
-| [docker/sandbox/Dockerfile](../../docker/sandbox/Dockerfile) | 生产环境基础镜像 | ubuntu:22.04 |
-| [docker/sandbox/Dockerfile.test](../../docker/sandbox/Dockerfile.test) | 测试环境镜像（添加 FastAPI） | wechat_sandbox:latest |
+## 目录结构
 
-### Docker Compose 编排文件
+```
+services/wechat_sandbox/
+├── README.md                   # 本文件
+├── ARCHITECTURE.md             # 架构设计文档
+├── QUICKSTART.md               # 快速开始指南
+├── BUSINESS_LOGIC_TEST.md      # 业务逻辑测试指南
+├── main.py                     # 主启动脚本
+├── config.yaml                 # 配置文件
+├── config.production.yaml      # 生产环境配置
+├── requirements.txt            # Python 依赖
+│
+├── api/                        # API 模块
+│   ├── __init__.py
+│   ├── app.py                  # FastAPI 应用
+│   ├── routes/                 # API 路由
+│   │   ├── __init__.py
+│   │   ├── message.py          # 消息路由
+│   │   ├── sandbox.py          # 沙盒路由
+│   │   └── config.py           # 配置路由
+│   └── models/                 # Pydantic 数据模型
+│       ├── __init__.py
+│       └── schema.py
+│
+├── core/                       # 核心业务逻辑
+│   ├── __init__.py
+│   ├── detector/               # 变化检测模块
+│   │   ├── __init__.py
+│   │   └── bubble_detector.py  # 气泡检测器
+│   ├── extractor/              # 内容提取模块
+│   │   ├── __init__.py
+│   │   ├── text_extractor.py   # 文本提取
+│   │   └── media_extractor.py  # 媒体提取
+│   ├── producer/               # 生产者模块 ⭐
+│   │   ├── __init__.py
+│   │   ├── observer.py         # 视觉观察者（基础）
+│   │   ├── monitor.py          # 消息监控器
+│   │   ├── content_fetcher.py  # 内容提取器
+│   │   ├── agent_consumer.py   # Agent 消费者
+│   │   ├── atspi_observer.py   # AT-SPI 观察者 ⭐
+│   │   ├── chat_window_listener.py   # 聊天窗口监听 ⭐
+│   │   ├── global_chat_listener.py   # 全局聊天监听 ⭐
+│   │   └── hybrid_producer.py  # 混合生产者 ⭐
+│   ├── queue/                  # Redis 队列管理
+│   │   ├── __init__.py
+│   │   └── stream_manager.py   # Stream 管理器
+│   ├── classifier/             # 消息分类器
+│   │   ├── __init__.py
+│   │   └── message_classifier.py
+│   └── platform/               # 平台适配
+│       ├── __init__.py
+│       └── linux_adapter.py
+│
+├── utils/                      # 工具类
+│   ├── __init__.py
+│   ├── config.py               # 配置加载
+│   ├── logger.py               # 日志工具
+│   └── redis_client.py         # Redis 客户端
+│
+├── services/                   # 服务模块
+│   ├── __init__.py
+│   └── ...
+│
+├── tests/                      # 单元测试
+│   ├── __init__.py
+│   └── ...
+│
+├── media/                      # 媒体文件（自动创建）
+├── logs/                       # 日志文件（自动创建）
+├── data/                       # 数据文件
+├── static/                     # 静态文件
+└── archive/                    # 归档文件
+```
 
-| 文件 | 用途 | 环境 |
+⭐ 标记为 AT-SPI 混合方案相关的新增模块
+
+## 核心模块说明
+
+### Producer 模块 (core/producer/)
+
+消息生产者模块，负责从微信界面采集消息并推送到队列。
+
+| 模块 | 说明 | 方案 | 状态 |
+|------|------|------|------|
+| `observer.py` | 视觉观察者 | 双生产者 | ✅ 稳定 |
+| `monitor.py` | 消息监控器 | 双生产者 | ✅ 稳定 |
+| `content_fetcher.py` | 内容提取器 | 双生产者 | ✅ 稳定 |
+| `agent_consumer.py` | Agent 消费者 | 通用 | ✅ 稳定 |
+| `atspi_observer.py` | AT-SPI 观察者 | AT-SPI | ⭐ 新增 |
+| `chat_window_listener.py` | 聊天窗口监听 | AT-SPI | ⭐ 新增 |
+| `global_chat_listener.py` | 全局聊天监听 | AT-SPI | ⭐ 新增 |
+| `hybrid_producer.py` | 混合生产者 | 混合 | ⭐ 新增 |
+
+### API 模块 (api/)
+
+FastAPI 应用，提供 REST 接口和 SSE 流。
+
+| 路由 | 端点 | 说明 |
 |------|------|------|
-| [docker/compose/docker-compose.sandbox.test.yml](../../docker/compose/docker-compose.sandbox.test.yml) | 测试单实例部署（含 FastAPI） | 测试 |
+| `message.py` | `/api/stream/messages` | SSE 消息流 |
+| `sandbox.py` | `/api/sandbox/*` | 沙盒管理接口 |
+| `config.py` | `/api/config/*` | 配置管理接口 |
 
-### 应用代码
+### Detector 模块 (core/detector/)
 
-| 目录/文件 | 用途 |
-|-----------|------|
-| [main.py](./main.py) | 主启动脚本 |
-| [backup_start.py](./backup_start.py) | 备用启动脚本 |
-| [api/](./api/) | API 模块（FastAPI 应用、路由、配置管理） |
-| [core/](./core/) | 核心业务逻辑模块（消息监控、提取、分类、队列管理） |
-| [core/detector/](./core/detector/) | 变化检测模块（dHash、气泡检测、屏幕变化） |
-| [core/extractor/](./core/extractor/) | 内容提取模块（文本提取、媒体截图） |
-| [core/producer/](./core/producer/) | 生产者模块（Observer、ContentFetcher、AgentConsumer） |
-| [core/queue/](./core/queue/) | Redis Stream 队列管理 |
-| [core/classifier/](./core/classifier/) | 消息类型分类器（文本/图片/视频/链接） |
-| [core/platform/](./core/platform/) | 平台适配模块（跨平台支持） |
-| [utils/](./utils/) | 工具类（配置、日志） |
-| [tests/](./tests/) | 测试代码 |
-| [services/](./services/) | 服务模块 |
+变化检测模块，用于检测界面变化和新消息。
+
+| 模块 | 功能 |
+|------|------|
+| `bubble_detector.py` | 气泡检测（dHash 算法）|
+
+### Extractor 模块 (core/extractor/)
+
+内容提取模块，从界面提取文本和媒体内容。
+
+| 模块 | 功能 |
+|------|------|
+| `text_extractor.py` | OCR 文本提取 |
+| `media_extractor.py` | 媒体文件截图 |
+
+## 配置说明
+
+### config.yaml
+
+主要配置项：
+
+```yaml
+wechat:
+  instance_id: default
+  group_name: "测试群"
+
+monitor:
+  screenshot_interval: 1
+  check_interval: 0.5
+
+roi:
+  x: 0
+  y: 0
+  width: 400
+  height: 800
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+```
+
+### AT-SPI 配置（测试环境）
+
+AT-SPI 相关的环境变量：
+
+```yaml
+# 环境变量（在 Dockerfile.test 中设置）
+QT_ACCESSIBILITY: 1
+GNOME_ACCESSIBILITY: 1
+QT_LINUX_ACCESSIBILITY_ALWAYS_ON: 1
+TZ: Asia/Shanghai
+```
+
+## 使用方法
+
+### 1. 构建镜像
+
+**基础镜像（生产环境）：**
+```bash
+docker build -f docker/sandbox/Dockerfile -t wechat_sandbox:latest ../..
+```
+
+**测试镜像（带 AT-SPI）：**
+```bash
+docker build -f docker/sandbox/Dockerfile.test -t wechat_sandbox-test:latest ../..
+```
+
+### 2. 启动服务
+
+**使用 Docker Compose（推荐）：**
+```bash
+# 测试环境（AT-SPI 支持）
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml up -d
+
+# 生产环境
+docker-compose -f docker/compose/docker-compose.prod.yml up -d
+```
+
+**手动运行容器：**
+```bash
+docker run -d --name wechat_sandbox \
+  --privileged \
+  -p 8000:8000 \
+  -p 6080:6080 \
+  -p 5900:5900 \
+  -v $(pwd)/media:/app/media \
+  -v $(pwd)/logs:/app/logs \
+  -e DISPLAY=:99 \
+  wechat_sandbox:latest
+```
+
+### 3. 启动消息生产者
+
+**AT-SPI 混合方案：**
+```bash
+docker exec -it wechat_sandbox_test python3 -m core.producer.hybrid_producer
+```
+
+**双生产者架构：**
+```bash
+# Producer1: Observer
+docker exec -it wechat_sandbox python3 -m core.producer.observer
+
+# Producer2: ContentFetcher
+docker exec -it wechat_sandbox python3 -m core.producer.content_fetcher
+```
+
+### 4. 访问服务
+
+| 服务 | 地址 | 说明 |
+|------|------|------|
+| noVNC | http://localhost:6080 | Web 界面 |
+| API 文档 | http://localhost:8000/docs | Swagger |
+| SSE 流 | http://localhost:8000/api/stream/messages | 消息流 |
+| 健康检查 | http://localhost:8000/health | 健康状态 |
+
+## AT-SPI 混合方案使用
+
+### 快速测试
+
+```bash
+# 1. 启动测试环境
+docker-compose -f docker/compose/docker-compose.sandbox.test.yml up -d
+
+# 2. 运行 AT-SPI 简单测试
+docker exec -it wechat_sandbox_test python3 /app/test_atspi_simple.py
+
+# 3. 运行 AT-SPI 完整测试
+docker exec -it wechat_sandbox_test bash /app/test_atspi_solution.sh
+
+# 4. 启动混合生产者
+docker exec -it wechat_sandbox_test python3 -m core.producer.hybrid_producer
+```
 
 ### 启动脚本
 
-| 文件 | 用途 |
-|------|------|
-| [docker/scripts/start_sandbox.sh](../../docker/scripts/start_sandbox.sh) | 通用启动脚本 |
-| [docker/scripts/start_wechat.sh](../../docker/scripts/start_wechat.sh) | WeChat 沙箱启动脚本（Xvfb、Fluxbox、noVNC、WeChat） |
-| [docker/scripts/start_wechat_sandbox.bat](../../docker/scripts/start_wechat_sandbox.bat) | Windows 启动脚本 |
+容器内可用的启动脚本（位于 `/app/docker/scripts/`）：
 
-### 配置文件
+**通用脚本：**
+- `common/start_all.sh` - 启动所有服务
+- `common/start_sandbox.sh` - 启动沙盒容器
+- `common/start_wechat.sh` - 启动微信应用
 
-| 文件 | 用途 |
-|------|------|
-| [config.yaml](./config.yaml) | 配置文件（微信、监控、ROI、Redis） |
-| [config.production.yaml](./config.production.yaml) | 生产环境配置文件 |
-| [requirements.txt](./requirements.txt) | Python 依赖 |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | 架构文档 |
-| [BUSINESS_LOGIC_TEST.md](./BUSINESS_LOGIC_TEST.md) | 业务逻辑测试指南 |
-| [QUICKSTART.md](./QUICKSTART.md) | 快速开始 |
+**AT-SPI 脚本：**
+- `atspi/restart_wechat_with_dbus.sh` - 重启微信（使用 DBus）
+- `atspi/run_atspi_observer.sh` - 运行 AT-SPI 观察者
+- `atspi/test_atspi_simple.py` - AT-SPI 简单测试
+- `atspi/test_atspi_solution.sh` - AT-SPI 完整测试
 
-### 数据目录
+## 数据流
 
-| 目录 | 用途 |
-|------|------|
-| [docker/sandbox/media/](../../docker/sandbox/media/) | 媒体文件目录（自动创建） |
-| [docker/sandbox/logs/](../../docker/sandbox/logs/) | 日志文件目录（自动创建） |
+### AT-SPI 混合方案
 
-### 归档目录
-
-[archive/](./archive/) - 包含过时的配置文件
-
-## 快速开始
-
-### 构建生产环境镜像
-```bash
-docker build -f docker/sandbox/Dockerfile -t wechat_sandbox:latest .
+```
+┌─────────────────┐
+│  WeChat App     │
+└────────┬────────┘
+         │
+    ┌────▼─────┐
+    │ AT-SPI   │ (UI 控件监听)
+    │ Observer  │
+    └────┬─────┘
+         │
+    ┌────▼──────┐
+    │  Hybrid   │ (混合生产者)
+    │ Producer  │
+    └────┬──────┘
+         │
+    ┌────▼────────────┐
+    │  Redis Stream   │
+    │  (precise)      │
+    └─────────────────┘
 ```
 
-### 启动生产环境（单实例）
-```bash
-docker run -d --name wechat_sandbox \
-    --privileged \
-    -p 6080:6080 \
-    -p 5900:5900 \
-    -v docker/sandbox/media:/app/media \
-    -v docker/sandbox/logs:/app/logs \
-    -e DISPLAY=:99 \
-    wechat_sandbox:latest
+### 双生产者架构
+
+```
+┌─────────────────┐
+│  WeChat App     │
+└────────┬────────┘
+         │
+    ┌────▼─────────┐
+    │   Observer    │ (检测气泡)
+    │  Producer1    │
+    └────┬─────────┘
+         │
+    ┌────▼──────────┐
+    │  Redis Stream │
+    │   (raw)       │
+    └────┬──────────┘
+         │
+    ┌────▼─────────────┐
+    │ ContentFetcher   │ (提取内容)
+    │   Producer2      │
+    └────┬─────────────┘
+         │
+    ┌────▼────────────┐
+    │  Redis Stream   │
+    │   (precise)     │
+    └─────────────────┘
 ```
 
-### 测试环境（使用 Docker Compose）
-```bash
-cd docker/compose
-docker-compose -f docker-compose.sandbox.test.yml up -d
-```
+## API 接口
 
-## 访问地址
-
-- **noVNC Web 界面**: http://localhost:6080/vnc.html
-- **VNC**: localhost:5900
-- **FastAPI 文档**: http://localhost:8000/docs
-- **健康检查**: http://localhost:8000/api/health
-- **服务状态**: http://localhost:8000/api/status
-- **SSE 消息流**: http://localhost:8000/api/stream
-- **配置管理**: http://localhost:8000/api/config
-- **实例管理**: http://localhost:8000/api/instance/start, http://localhost:8000/api/instance/stop
-- **Redis**: localhost:6379
-
-## 端口映射
-
-| 端口 | 服务 | 说明 |
-|------|------|------|
-| 6080 | noVNC | Web 界面 |
-| 5900 | VNC | VNC 客户端 |
-| 8000 | FastAPI | API 服务 |
-| 6379 | Redis | 数据库 |
-
-## 访问微信界面
-
-### 方式一：通过浏览器访问（推荐）
-
-1. 打开浏览器访问：`http://localhost:6080/vnc.html`
-2. 在连接对话框中输入密码：`wechat123`
-3. 等待微信界面加载完成
-
-### 方式二：通过 VNC 客户端访问
-
-1. 使用 VNC 客户端（如 RealVNC、TightVNC）连接：
-   - 主机：`localhost`
-   - 端口：`5900`
-   - 密码：`wechat123`
-
-## 常用命令
-
-### 停止容器
+### SSE 消息流
 
 ```bash
-docker stop wechat_sandbox
-docker rm wechat_sandbox
+curl -N http://localhost:8000/api/stream/messages
 ```
 
-### 重启容器
+响应格式：
+```
+event: message
+data: {"sender":"张三","content":"测试消息","type":"text","timestamp":"2025-01-12T12:00:00"}
+
+event: heartbeat
+data: {"timestamp":"2025-01-12T12:00:05"}
+```
+
+### 沙盒管理
 
 ```bash
-docker restart wechat_sandbox
+# 获取沙盒状态
+curl http://localhost:8000/api/sandbox/status
+
+# 启动沙盒
+curl -X POST http://localhost:8000/api/sandbox/start
+
+# 停止沙盒
+curl -X POST http://localhost:8000/api/sandbox/stop
+
+# 重启沙盒
+curl -X POST http://localhost:8000/api/sandbox/restart
 ```
 
-### 查看容器日志
+## 测试
+
+### 运行单元测试
 
 ```bash
-docker logs -f wechat_sandbox
+# 运行所有测试
+pytest services/wechat_sandbox/tests/
+
+# 运行特定测试
+pytest services/wechat_sandbox/tests/test_producer.py -v
+
+# 查看覆盖率
+pytest --cov=services/wechat_sandbox services/wechat_sandbox/tests/
 ```
 
-### 进入容器终端
+### 运行集成测试
 
 ```bash
-docker exec -it wechat_sandbox bash
+# 在项目根目录
+pytest tests/atspi/test_atspi_observer.py -v
 ```
-
-### 查看容器状态
-
-```bash
-docker ps | grep wechat_sandbox
-```
-
-## 功能特性
-
-### 1. 虚拟显示环境
-- 使用 Xvfb 提供 1920x1080 分辨率的虚拟显示器
-- 配置 Fluxbox 窗口管理器
-
-### 2. 远程访问
-- **noVNC**：通过浏览器访问（端口 6080）
-- **x11vnc**：通过 VNC 客户端访问（端口 5900）
-
-### 3. 双生产者架构
-- **Producer1 Observer**：监控微信群聊消息气泡
-- **Producer2 ContentFetcher**：提取消息精确内容（文本、图片、视频）
-- **AgentConsumer**：消费者代理，消费精确消息队列
-- **Redis Stream**：消息队列管理（原始消息队列、精确消息队列）
-- **SSE 推送**：实时推送消息到外部系统
-- **跨平台支持**：PlatformAdapter 抽象基类，支持 Linux 和 Windows
-
-### 4. 统一 API 服务
-- **FastAPI 应用**：统一的 API 入口点
-- **健康检查端点**：服务健康状态监控
-- **配置管理端点**：动态配置管理
-- **实例管理端点**：启动/停止服务实例
-- **SSE 流端点**：实时消息流推送
-
-### 5. 数据持久化
-- 微信用户数据存储在 Docker volume 中
-- 媒体文件映射到本地 `docker/sandbox/media/` 目录
-- 日志文件映射到本地 `docker/sandbox/logs/` 目录
-
-### 6. 启动脚本
-- **main.py**：主启动脚本，完整功能启动
-- **backup_start.py**：备用启动脚本，仅启动 FastAPI 服务
-- **docker/scripts/start_sandbox.sh**：Shell 启动脚本，Linux 环境使用
-- **docker/scripts/start_wechat.sh**：微信沙箱启动脚本，启动 Xvfb、Fluxbox、noVNC、WeChat
-- **docker/scripts/start_wechat_sandbox.bat**：Windows 启动脚本，Windows 环境使用
 
 ## 故障排查
 
-### 问题 1：容器无法启动
+### AT-SPI 相关问题
 
-检查 Docker 日志：
+**问题1: AT-SPI 找不到微信窗口**
 ```bash
-docker logs wechat_sandbox
+# 检查环境变量
+docker exec -it wechat_sandbox_test env | grep -E "QT_ACCESSIBILITY|GNOME_ACCESSIBILITY"
+
+# 重启微信（使用 DBus）
+docker exec -it wechat_sandbox_test bash /app/docker/scripts/atspi/restart_wechat_with_dbus.sh
 ```
 
-### 问题 2：无法通过浏览器访问
-
-1. 确认容器正在运行：`docker ps`
-2. 确认端口未被占用：`netstat -ano | findstr "6080"`
-3. 等待 30-60 秒让服务完全启动
-
-### 问题 3：微信界面显示异常
-
-重新启动容器：
+**问题2: AT-SPI 服务未运行**
 ```bash
-docker restart wechat_sandbox
+# 检查 AT-SPI 进程
+docker exec -it wechat_sandbox_test ps aux | grep at-spi
+
+# 使用 Accerciser 调试
+docker exec -it wechat_sandbox_test bash -c "accerciser &"
 ```
 
-### 问题 4：构建失败
+### Redis 连接问题
 
-确保 `WeChatLinux_x86_64.deb` 文件存在于项目 build 目录：
 ```bash
-ls build/WeChatLinux_x86_64.deb
+# 检查 Redis 连接
+docker exec -it wechat_sandbox_test python3 -c "
+from utils.redis_client import get_redis_client
+r = get_redis_client()
+print(r.ping())
+"
 ```
 
-### 问题 5：无法连接到服务器
+### 其他问题
 
-1. 检查容器是否正在运行
-2. 检查端口映射是否正确
-3. 查看 [docker/scripts/start_wechat.sh](../../docker/scripts/start_wechat.sh) 脚本日志
-
-### 问题 6：API 无法访问
-
-1. 确认 FastAPI 服务是否启动：`docker logs -f wechat_sandbox`
-2. 检查 API 路由前缀是否正确（/api/）
-3. 尝试使用备用启动脚本：`docker exec -it wechat_sandbox python backup_start.py`
-
-### 问题 7：Redis 连接失败
-
-1. 确认 Redis 容器已启动：`docker ps | grep redis`
-2. 检查健康状态：`docker exec <redis_container> redis-cli ping`
-3. 确认网络配置正确
-
-## 安全说明
-
-- VNC 密码默认为 `wechat123`，生产环境请修改
-- 容器以特权模式运行，仅用于开发测试
-- 不要将此容器暴露到公网
-
-## 开发说明
-
-### 自定义分辨率
-
-修改 [docker/scripts/start_wechat.sh](../../docker/scripts/start_wechat.sh) 中的 Xvfb 启动参数：
-```bash
-Xvfb :99 -screen 0 1920x1080x24 &
-```
-改为：
-```bash
-Xvfb :99 -screen 0 2560x1440x24 &
-```
-
-### 修改 VNC 密码
-
-修改 [docker/scripts/start_wechat.sh](../../docker/scripts/start_wechat.sh) 中的密码：
-```bash
-echo "wechat123" | vncpasswd -f > /root/.vnc/passwd
-```
-
-### 自定义字体
-
-在 [docker/sandbox/Dockerfile](../../docker/sandbox/Dockerfile) 中添加中文字体：
-```dockerfile
-RUN apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei
-```
-
-## 技术栈
-
-- **基础镜像**：Ubuntu 22.04
-- **显示服务**：Xvfb + Fluxbox
-- **远程访问**：noVNC + x11vnc
-- **应用**：Linux 微信 (WeChatLinux_x86_64.deb)
-- **API 框架**：FastAPI + uvicorn
-- **消息队列**：Redis Stream
-- **屏幕截图**：mss（兼容 Docker Xvfb）
-- **图像处理**：OpenCV + PIL
-- **跨平台支持**：PlatformAdapter 抽象基类
-- **异步通信**：httpx.AsyncClient (SSE 消费)
+详见：
+- [故障排查文档](../docs/wechat_sandbox_test_plan.md#常见问题和解决方案)
+- [Docker 主文档](../../docker/README.md#故障排查)
 
 ## 相关文档
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - 系统架构详细说明
-- [BUSINESS_LOGIC_TEST.md](./BUSINESS_LOGIC_TEST.md) - 业务逻辑测试指南
-- [QUICKSTART.md](./QUICKSTART.md) - 快速开始
-- [agent.md](../../agent.md) - 项目整体架构说明
-- [claude.md](../../claude.md) - 开发规范和约定
+### 项目文档
+- [项目架构文档](ARCHITECTURE.md)
+- [快速开始](QUICKSTART.md)
+- [业务逻辑测试](BUSINESS_LOGIC_TEST.md)
+
+### 技术文档
+- [AT-SPI 混合方案说明](../../docs/atspi_hybrid_solution.md)
+- [AT-SPI 部署配置](../../docs/atspi_deployment_config.md)
+- [测试方案](../../docs/wechat_sandbox_test_plan.md)
+
+### Docker 文档
+- [Docker 主文档](../../docker/README.md)
+- [脚本说明](../../docker/scripts/README.md)
+
+## 版本历史
+
+- **2025-01-12**:
+  - 添加 AT-SPI 混合方案支持
+  - 新增 `atspi_observer.py`, `chat_window_listener.py`, `global_chat_listener.py`, `hybrid_producer.py`
+  - 更新 Docker 镜像分层结构
+  - 整理启动脚本到 `docker/scripts/common/` 和 `docker/scripts/atspi/`
+
+- **早期版本**:
+  - 实现双生产者架构
+  - 实现 SSE 推送
+  - 实现消息分类和提取
+
+## 贡献指南
+
+### 添加新的 Producer
+
+1. 在 `core/producer/` 创建新文件
+2. 继承基础接口或参考现有实现
+3. 添加单元测试
+4. 更新本文档
+
+### 代码规范
+
+- 使用类型注解
+- 添加文档字符串
+- 遵循 PEP 8 规范
+- 添加日志记录
+
+## 许可证
+
+本项目遵循项目主许可证。

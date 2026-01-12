@@ -3,7 +3,13 @@
     "allow": [
       "Bash(tree:*)",
       "Bash(dir:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(docker-compose -f docker-compose.test.yml down)",
+      "Bash(docker exec:*)",
+      "WebSearch",
+      "Bash(docker.exe cp:*)",
+      "Bash(docker.exe exec:*)",
+      "Bash(ls:*)"
     ]
   }
 }

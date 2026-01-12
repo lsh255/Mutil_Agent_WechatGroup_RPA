@@ -1,8 +1,73 @@
+# ============================================================
+# 生产环境 Docker Compose 编排文件
+# ============================================================
+#
+# 用途：生产环境部署配置
+#
+# 包含服务：
+#   - redis: Redis 7 (消息队列、状态存储)
+#       * 端口: 6379
+#       * 支持密码认证 (REDIS_PASSWORD)
+#       * 数据持久化到 redis_data volume
+#       * 重启策略: unless-stopped
+#
+#   - ollama: Ollama AI 服务
+#       * 端口: 11434
+#       * 需要 NVIDIA GPU 支持
+#       * 重启策略: unless-stopped
+#
+#   - orchestrator: 协调中心服务
+#       * 端口: 8000
+#       * 健康检查: /health 端点
+#       * 重启策略: unless-stopped
+#
+#   - frontend: React 前端应用
+#       * 端口: 3000 (80)
+#       * 支持环境变量配置 API_URL 和 WS_URL
+#       * 重启策略: unless-stopped
+#
+#   - wechat-sandbox: 微信沙盒容器
+#       * 端口: 6080 (noVNC), 5900 (VNC), 8000 (API)
+#       * 支持密码配置 (VNC_PASSWORD, REDIS_PASSWORD)
+#       * 重启策略: unless-stopped
+#
+#   - nginx: 反向代理
+#       * 端口: 80, 443
+#       * SSL 证书挂载
+#       * 重启策略: unless-stopped
+#
+# 生产特性：
+#   - 所有服务设置 restart: unless-stopped
+#   - Redis 和微信沙盒支持密码认证
+#   - orchestrator 健康检查
+#   - 前端支持环境变量配置 API 地址
+#
+# 使用方法：
+#   # 1. 配置环境变量
+#   export REDIS_PASSWORD=your_secure_password
+#   export VNC_PASSWORD=your_vnc_password
+#   export API_URL=https://your-domain.com
+#   export WS_URL=wss://your-domain.com/ws
+#
+#   # 2. 启动生产环境
+#   docker-compose -f docker/compose/docker-compose.prod.yml up -d
+#
+#   # 3. 查看服务状态
+#   docker-compose -f docker/compose/docker-compose.prod.yml ps
+#
+# 安全建议：
+#   - 修改所有默认密码
+#   - 配置 SSL 证书
+#   - 限制端口暴露
+#   - 定期备份 redis_data 和 ollama_data volumes
+#
+# ============================================================
+
 version: '3.8'
 
 services:
   redis:
-    image: redis:7.2-alpine
+    image: redis:7-alpine
     container_name: wechat-redis-prod
     ports:
       - "6379:6379"
@@ -83,6 +148,7 @@ services:
     restart: unless-stopped
 
   wechat-sandbox:
+    image: wechat_sandbox:latest
     build:
       context: ../..
       dockerfile: docker/sandbox/Dockerfile
@@ -98,12 +164,16 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-default_password}
       - REDIS_DB=0
       - VNC_PASSWORD=${VNC_PASSWORD:-vnc123}
+      - TZ=Asia/Shanghai
+      - GNOME_ACCESSIBILITY=1
+      - QT_ACCESSIBILITY=1
+      - QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
     depends_on:
       redis:
         condition: service_healthy
     volumes:
-      - ./sandbox/media:/app/media
-      - ./sandbox/logs:/app/logs
+      - ../../services/wechat_sandbox/media:/app/media
+      - ../../services/wechat_sandbox/logs:/app/logs
     privileged: true
     cap_add:
       - SYS_ADMIN

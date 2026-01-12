@@ -1,8 +1,43 @@
+# ============================================================
+# 默认环境 Docker Compose 编排文件
+# ============================================================
+#
+# 用途：本地开发环境的完整服务编排
+#
+# 包含服务：
+#   - redis: Redis 7 (消息队列、状态存储)
+#   - ollama: Ollama AI 服务 (需要GPU支持)
+#   - orchestrator: 协调中心服务 (LangGraph工作流引擎)
+#   - frontend: React 前端应用
+#   - wechat-sandbox: 微信沙盒容器 (双生产者架构)
+#   - nginx: 反向代理 (可选)
+#
+# 镜像策略：优先使用本地镜像，不存在则构建
+#   - redis:7-alpine
+#   - wechat_sandbox:latest
+#
+# 使用方法：
+#   # 启动所有服务
+#   docker-compose -f docker/compose/docker-compose.yml up -d
+#
+#   # 停止所有服务
+#   docker-compose -f docker/compose/docker-compose.yml down
+#
+#   # 查看日志
+#   docker-compose -f docker/compose/docker-compose.yml logs -f [service_name]
+#
+# 注意事项：
+#   - Ollama 需要 NVIDIA GPU 支持
+#   - 微信沙盒需要特权模式运行
+#   - 首次启动需要在 noVNC 中扫码登录微信
+#
+# ============================================================
+
 version: '3.8'
 
 services:
   redis:
-    image: redis:7.2-alpine
+    image: redis:7-alpine
     container_name: wechat-redis
     ports:
       - "6379:6379"
@@ -71,6 +106,7 @@ services:
       - wechat-network
 
   wechat-sandbox:
+    image: wechat_sandbox:latest
     build:
       context: ../..
       dockerfile: docker/sandbox/Dockerfile
@@ -85,12 +121,16 @@ services:
       - REDIS_PORT=6379
       - REDIS_DB=0
       - VNC_PASSWORD=vnc123
+      - TZ=Asia/Shanghai
+      - GNOME_ACCESSIBILITY=1
+      - QT_ACCESSIBILITY=1
+      - QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
     depends_on:
       redis:
         condition: service_healthy
     volumes:
-      - ./sandbox/media:/app/media
-      - ./sandbox/logs:/app/logs
+      - ../../services/wechat_sandbox/media:/app/media
+      - ../../services/wechat_sandbox/logs:/app/logs
     privileged: true
     cap_add:
       - SYS_ADMIN

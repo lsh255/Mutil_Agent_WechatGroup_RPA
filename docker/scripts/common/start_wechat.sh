@@ -39,8 +39,8 @@ sleep 2
 cd /app
 
 echo "[5/5] Starting WeChat application..."
-/opt/wechat/wechat &
-echo "WeChat application launched"
+QT_ACCESSIBILITY=1 /opt/wechat/wechat &
+echo "WeChat application launched (QT_ACCESSIBILITY enabled)"
 
 sleep 2
 

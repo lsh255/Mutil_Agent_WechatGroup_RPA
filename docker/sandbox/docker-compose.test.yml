@@ -1,3 +1,72 @@
+# ============================================================
+# 微信沙盒模块化测试环境 Docker Compose 编排文件
+# ============================================================
+#
+# 用途：从 docker/sandbox 目录独立启动微信沙盒测试环境
+#
+# 与 compose 版本的区别：
+#   - 位置：在 docker/sandbox 目录下（模块化管理）
+#   - 路径：volumes 使用相对路径 ./media 和 ./logs
+#   - 启动：需要 cd 到 docker/sandbox 目录执行
+#
+# 包含服务：
+#   - redis: Redis 7 (消息队列)
+#       * 端口: 6379
+#       * 容器名: wechat_redis_test
+#       * 数据持久化: redis_data volume
+#
+#   - wechat_sandbox: 微信沙盒测试容器
+#       * 端口:
+#         - 8000: SSE API (消息推送接口)
+#         - 6080: noVNC (浏览器访问)
+#         - 5900: VNC (VNC客户端)
+#       * 容器名: wechat_sandbox_test
+#       * 镜像: wechat_sandbox-test:latest
+#       * 基础镜像: wechat_sandbox:latest
+#
+# 使用方法：
+#   # 1. 进入 sandbox 目录
+#   cd docker/sandbox
+#
+#   # 2. 构建测试镜像
+#   docker-compose -f docker-compose.test.yml build
+#
+#   # 3. 启动测试环境
+#   docker-compose -f docker-compose.test.yml up -d
+#
+#   # 4. 访问 noVNC 登录微信
+#   # 浏览器: http://localhost:6080
+#   # VNC密码: wechat123
+#
+#   # 5. 测试 AT-SPI 功能
+#   docker exec -it wechat_sandbox_test bash /app/test_atspi_solution.sh
+#
+#   # 6. 停止并清理
+#   docker-compose -f docker-compose.test.yml down
+#
+# 数据目录结构：
+#   docker/sandbox/
+#   ├── media/          # 媒体文件存储（图片、视频等）
+#   ├── logs/           # 应用日志
+#   └── docker-compose.test.yml
+#
+# AT-SPI 支持：
+#   - TZ=Asia/Shanghai (时区配置)
+#   - GNOME_ACCESSIBILITY=1 (GNOME 辅助功能)
+#   - QT_ACCESSIBILITY=1 (Qt 辅助功能)
+#   - QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 (Qt 持续启用)
+#
+# 注意事项：
+#   - 首次启动需要扫码登录微信
+#   - media 和 logs 目录会自动创建在当前目录
+#   - 与 compose 版本功能完全相同，仅路径和启动位置不同
+#
+# 推荐使用：
+#   - 如果从项目根目录管理 → 使用 compose/docker-compose.sandbox.test.yml
+#   - 如果仅测试沙盒模块 → 使用本文件（更简单）
+#
+# ============================================================
+
 version: '3.8'
 
 services:
@@ -33,6 +102,10 @@ services:
       - REDIS_PORT=6379
       - REDIS_DB=0
       - VNC_PASSWORD=wechat123
+      - TZ=Asia/Shanghai
+      - GNOME_ACCESSIBILITY=1
+      - QT_ACCESSIBILITY=1
+      - QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
     depends_on:
       redis:
         condition: service_healthy

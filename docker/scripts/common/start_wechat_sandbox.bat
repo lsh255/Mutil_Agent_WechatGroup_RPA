@@ -20,8 +20,8 @@ if not exist "build\WeChatLinux_x86_64.deb" (
 
 REM 创建必要的目录
 echo [1/3] 创建媒体和日志目录...
-if not exist "docker\sandbox\media" mkdir docker\sandbox\media
-if not exist "docker\sandbox\logs" mkdir docker\sandbox\logs
+if not exist "services\wechat_sandbox\media" mkdir services\wechat_sandbox\media
+if not exist "services\wechat_sandbox\logs" mkdir services\wechat_sandbox\logs
 
 REM 构建并启动容器
 echo [2/3] 构建并启动微信沙盒容器...
@@ -38,8 +38,8 @@ docker run -d --name wechat_sandbox ^
     --privileged ^
     -p 6080:6080 ^
     -p 5900:5900 ^
-    -v docker\sandbox\media:/app/media ^
-    -v docker\sandbox\logs:/app/logs ^
+    -v services\wechat_sandbox\media:/app/media ^
+    -v services\wechat_sandbox\logs:/app/logs ^
     -e DISPLAY=:99 ^
     wechat_sandbox:latest
 

@@ -1,18 +1,40 @@
-# =====================================================
-# 分层 Dockerfile - WeChat 沙箱单实例部署
-# =====================================================
-# 分层策略：
-#   1. 基础系统层（几乎不变）
-#   2. 桌面环境层（低频变动）
-#   3. WeChat 基础依赖层（偶尔变动）
-#   4. 字体层（低频变动）
-#   5. WeChat 应用层（偶尔变动）
-#   6. 依赖补丁层（高频变动，方便添加缺失依赖）
-#   7. Python 环境层（可选，如需 Python 功能）
-#   8. 配置层（经常变动）
-# =====================================================
-
-# 使用 Ubuntu 22.04 作为基础镜像
+# ============================================================
+# 微信沙盒基础镜像 Dockerfile
+# ============================================================
+#
+# 用途：构建生产环境和默认环境使用的微信沙盒镜像
+#
+# 功能特性：
+#   - VNC 服务器（端口 5900）
+#   - noVNC Web 访问（端口 6080）
+#   - 微信 Linux 版本（4.1.13）
+#   - Python 3.10 + FastAPI
+#   - 双生产者架构（视觉方案）
+#
+# 分层构建策略（优化缓存和构建速度）：
+#   Layer 1: 基础系统工具（几乎不变）
+#   Layer 2: 桌面环境（VNC + noVNC + X11 + Fluxbox）
+#   Layer 3: WeChat 基础依赖
+#   Layer 4: 中文字体
+#   Layer 5: WeChat 应用安装
+#   Layer 6: 依赖补丁（高频变动）
+#   Layer 7: Python 环境和依赖
+#   Layer 8: 应用代码和配置
+#
+# 生成镜像：wechat_sandbox:latest
+#
+# 使用场景：
+#   - 生产环境部署
+#   - 默认开发环境
+#   - 多实例部署（docker-compose.multi.yml）
+#
+# 不包含：
+#   - AT-SPI 辅助功能支持（详见 Dockerfile.test）
+#   - 调试工具（Accerciser 等）
+#
+# 如果需要 AT-SPI 支持，请使用 Dockerfile.test 构建
+#
+# ============================================================
 FROM ubuntu:22.04
 
 # 设置工作目录为 /app
@@ -140,11 +162,17 @@ RUN apt-get update && apt-get install -y --fix-missing \
 RUN mkdir -p /root/.vnc && \
     chmod 700 /root/.vnc
 
+# 复制Python应用代码到容器
+COPY services/wechat_sandbox /app/
+
+# 安装Python依赖
+RUN pip3 install --no-cache-dir -r /app/requirements.txt
+
 # 创建媒体和日志目录
 RUN mkdir -p /app/media /app/logs
 
 # 复制启动脚本到容器
-COPY scripts/start_wechat.sh /app/
+COPY docker/scripts/common/start_wechat.sh /app/
 # 设置启动脚本可执行权限
 RUN chmod +x /app/start_wechat.sh
 

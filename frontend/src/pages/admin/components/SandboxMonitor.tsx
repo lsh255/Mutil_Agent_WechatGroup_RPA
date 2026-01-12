@@ -45,7 +45,7 @@ export default function SandboxMonitor() {
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [currentROI, setCurrentROI] = useState<ROIConfig>({ left: 0, top: 0, right: 0, bottom: 0 })
-  const [producerStatus, setProducerStatus] = useState<ProducerStatus[]>([
+  const [producerStatus] = useState<ProducerStatus[]>([
     { id: 'producer1', name: 'Producer1 (观察者)', status: 'running' },
     { id: 'producer2', name: 'Producer2 (内容获取)', status: 'running' },
     { id: 'queue', name: '消息队列 (Redis)', status: 'running' },
@@ -133,7 +133,7 @@ export default function SandboxMonitor() {
     try {
       const response = await takeScreenshot({ instanceId: selectedInstance || 'default' })
       if (response) {
-        const blob = new Blob([response], { type: 'image/png' })
+        const blob = new Blob([response as unknown as BlobPart], { type: 'image/png' })
         const url = URL.createObjectURL(blob)
         window.open(url, '_blank')
         toast({ title: '截屏成功' })
@@ -150,7 +150,7 @@ export default function SandboxMonitor() {
     try {
       const response = await takeScreenshot({ instanceId: selectedInstance || 'default' })
       if (response) {
-        const blob = new Blob([response], { type: 'image/png' })
+        const blob = new Blob([response as unknown as BlobPart], { type: 'image/png' })
         const url = URL.createObjectURL(blob)
         setScreenshotUrl(url)
         toast({ title: '截图已刷新' })

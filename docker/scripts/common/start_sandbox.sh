@@ -40,4 +40,4 @@ echo "noVNC started on port 6080"
 cd /app
 
 echo "Starting FastAPI and Producer services..."
-python start_service.py
+python main.py

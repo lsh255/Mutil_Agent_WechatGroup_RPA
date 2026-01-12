@@ -1,3 +1,83 @@
+# ============================================================
+# 微信沙盒测试环境 Docker Compose 编排文件
+# ============================================================
+#
+# 用途：独立测试微信沙盒功能（双生产者架构 + AT-SPI混合方案）
+#
+# 包含服务：
+#   - redis: Redis 7 (消息队列)
+#       * 端口: 6379
+#       * 持久化到 redis_data volume
+#       * 健康检查: redis-cli ping
+#
+#   - wechat_sandbox: 微信沙盒测试容器
+#       * 端口:
+#         - 6080: noVNC (浏览器访问)
+#         - 5900: VNC (VNC客户端)
+#         - 8000: SSE API (消息推送)
+#       * 镜像: wechat_sandbox-test:latest
+#       * 基础镜像: wechat_sandbox:latest
+#
+# 测试特性：
+#   - 基于 Dockerfile.test 构建 (包含 AT-SPI 依赖)
+#   - 优化的环境变量配置
+#   - 支持交互式运行 (stdin_open, tty)
+#   - 数据持久化: media, logs, wechat_data
+#
+# 使用方法：
+#   # 1. 构建测试镜像
+#   docker-compose -f docker/compose/docker-compose.sandbox.test.yml build
+#
+#   # 2. 启动测试环境
+#   docker-compose -f docker/compose/docker-compose.sandbox.test.yml up -d
+#
+#   # 3. 访问 noVNC 登录微信
+#   # 浏览器打开: http://localhost:6080
+#   # 密码: wechat123
+#
+#   # 4. 测试 AT-SPI 功能
+#   docker exec -it wechat_sandbox_test bash /app/test_atspi_solution.sh
+#
+#   # 5. 测试双生产者架构
+#   docker exec -it wechat_sandbox_test python3 -m core.producer.hybrid_producer
+#
+#   # 6. 查看 SSE 消息流
+#   curl http://localhost:8000/api/stream/messages
+#
+#   # 7. 查看日志
+#   docker-compose -f docker/compose/docker-compose.sandbox.test.yml logs -f
+#
+# 测试场景：
+#   1. AT-SPI 混合方案测试
+#      - UI控件监听
+#      - 视觉兜底方案
+#      - 自动降级切换
+#
+#   2. 双生产者架构测试
+#      - Producer1: 检测消息气泡
+#      - Producer2: 精确内容提取
+#      - Redis Streams 队列
+#
+#   3. SSE 推送测试
+#      - 实时消息推送
+#      - 前端集成测试
+#
+# 调试工具：
+#   - Accerciser: AT-SPI UI 控件树查看器
+#   - 启动: docker exec -it wechat_sandbox_test bash -c "accerciser &"
+#
+# 注意事项：
+#   - 首次启动需要扫码登录微信
+#   - AT-SPI 需要 QT_ACCESSIBILITY=1 环境变量
+#   - 测试完成后可使用 docker down 清理容器
+#
+# 相关文档：
+#   - docs/atspi_hybrid_solution.md
+#   - docs/atspi_deployment_config.md
+#   - docs/wechat_sandbox_test_plan.md
+#
+# ============================================================
+
 version: '3.8'
 
 services:
@@ -33,12 +113,16 @@ services:
       - REDIS_PORT=6379
       - REDIS_DB=0
       - VNC_PASSWORD=wechat123
+      - TZ=Asia/Shanghai
+      - GNOME_ACCESSIBILITY=1
+      - QT_ACCESSIBILITY=1
+      - QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
     depends_on:
       redis:
         condition: service_healthy
     volumes:
-      - ./sandbox/media:/app/media
-      - ./sandbox/logs:/app/logs
+      - ../../services/wechat_sandbox/media:/app/media
+      - ../../services/wechat_sandbox/logs:/app/logs
       - wechat_data:/root/.wechat
     privileged: true
     cap_add:

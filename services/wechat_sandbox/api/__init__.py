@@ -8,14 +8,14 @@ from contextlib import asynccontextmanager
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from utils.logger import logger
-from utils.config import config
-
 from api.config import router as config_router
 from api.instance import router as instance_router
 from api.stream import router as stream_router, set_queue_manager
 from api.health import router as health_router, set_components
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from utils.logger import logger
+from utils.config import config
 
 queue_manager = None
 producer1 = None
