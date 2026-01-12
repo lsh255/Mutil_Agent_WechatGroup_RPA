@@ -60,7 +60,8 @@ class HybridProducer:
         redis_client,
         mode: ProductionMode = ProductionMode.HYBRID,
         raw_queue: str = "wechat:messages:raw",
-        precise_queue: str = "wechat:messages:precise"
+        precise_queue: str = "wechat:messages:precise",
+        save_dir: str = "/host/data"
     ):
         """
         初始化混合生产者
@@ -70,11 +71,13 @@ class HybridProducer:
             mode: 生产模式（ATSPI/VISUAL/HYBRID）
             raw_queue: 原始消息队列名（视觉方案使用）
             precise_queue: 精确消息队列名
+            save_dir: 文件保存目录（挂载到物理机）
         """
         self.redis = redis_client
         self.mode = mode
         self.raw_queue = raw_queue
         self.precise_queue = precise_queue
+        self.save_dir = save_dir
 
         # AT-SPI观察者
         self.atspi_observer = None
@@ -139,9 +142,13 @@ class HybridProducer:
             bool: 是否初始化成功
         """
         try:
-            from core.producer.atspi_observer import ATSPIObserver
+            from core.atspi.observer import ATSPIObserver
 
-            self.atspi_observer = ATSPIObserver()
+            # 启用通用消息提取，指定保存目录
+            self.atspi_observer = ATSPIObserver(
+                enable_universal_extraction=True,
+                save_dir=self.save_dir
+            )
 
             if self.atspi_observer.initialize():
                 # 添加消息处理回调
@@ -217,13 +224,15 @@ class HybridProducer:
                 'content': {
                     'type': message.message_type,
                     'text': message.content,
-                    'media_path': None,
+                    'media_path': message.image_path,  # 缩略图路径（如果有）
+                    'high_res_media_path': message.high_res_image_path,  # 高清图片路径（仅photo消息）
                     'media_image_base64': None
                 },
                 'metadata': {
                     'producer': 'hybrid_producer_atspi',
                     'production_mode': 'atspi',
-                    'processed_at': datetime.now().isoformat()
+                    'processed_at': datetime.now().isoformat(),
+                    'is_photo': message.message_type == 'photo'  # 标记是否为photo消息
                 }
             }
 

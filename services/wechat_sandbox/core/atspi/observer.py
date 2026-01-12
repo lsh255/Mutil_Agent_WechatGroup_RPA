@@ -67,7 +67,7 @@ class ATSPIObserver:
         # 延迟初始化通用消息提取器
         if enable_universal_extraction:
             try:
-                from core.producer.photo_extractor import UniversalMessageExtractor
+                from core.message.extractor import UniversalMessageExtractor
                 self.universal_extractor = UniversalMessageExtractor(save_dir=save_dir)
                 logger.info("通用消息提取器已启用")
             except ImportError as e:

@@ -33,12 +33,23 @@
 
 ### 微信沙盒架构
 
-微信沙盒采用分层架构设计：
+微信沙盒采用分层架构设计（v2.0 - AT-SPI混合架构）：
 
 - **API接口层 (`api/`)**: FastAPI路由，提供REST API和SSE流式接口
-- **核心业务逻辑层 (`core/`)**: 包含消息生产者、队列管理、变化检测、内容提取、消息分类等核心模块
+- **核心业务逻辑层 (`core/`)**: 包含消息生产者、队列管理、AT-SPI监听、消息提取等核心模块
+  - **AT-SPI模块 (`core/atspi/`)**: AT-SPI UI控件监听和消息观察
+  - **消息处理模块 (`core/message/`)**: 通用消息提取、分类和模型定义
+  - **窗口管理模块 (`core/window/`)**: 窗口检测、交互和自动化操作
+  - **生产者模块 (`core/producer/`)**: 混合生产者（AT-SPI + 视觉方案）
+  - **视觉检测模块 (`core/detector/`)**: 基于视觉的消息检测（兜底方案）
 - **服务编排层 (`services/`)**: 统一管理组件生命周期和服务编排
 - **工具模块 (`utils/`)**: 配置管理、日志记录、跨平台适配等工具函数
+
+**核心特性**:
+- **AT-SPI优先**: 使用Linux AT-SPI (Assistive Technology Service Provider Interface) 直接访问微信UI控件树
+- **通用消息提取**: 点击所有消息，通过检测新窗口来判断消息类型
+- **混合架构**: AT-SPI失败时自动降级到视觉检测方案
+- **JSONL格式**: SSE流使用JSONL (JSON Lines) 格式推送消息
 
 ### Docker配置统一管理
 
@@ -459,17 +470,44 @@ open htmlcov/index.html
 
 ## 微信沙盒服务
 
-微信沙盒容器提供双生产者模型的消息生产服务，通过Redis和FastAPI暴露消息流供monitor_agent.py消费。
+微信沙盒容器提供混合生产者模型的消息生产服务（v2.0 - AT-SPI优先架构），通过Redis和FastAPI暴露消息流供monitor_agent.py消费。
 
 ### 架构说明
 
+**混合生产者架构**:
+
+- **AT-SPI模式（优先）**: 使用Linux AT-SPI直接访问微信UI控件树，监听消息列表变化
+- **视觉模式（兜底）**: 当AT-SPI不可用时，自动降级到基于视觉的消息检测
+
+**AT-SPI工作流程**:
+1. **AT-SPI Observer**: 监听微信消息列表UI控件树变化
+2. **Universal Message Extractor**: 点击所有消息，检测是否唤起新窗口
+3. **窗口类型判断**: 根据窗口标题分类消息
+   - 无窗口 → text
+   - "Photos and Videos" → photo/video
+   - "File Transfer" → file
+   - "Browser" → link
+4. **媒体保存**: 将图片/视频/文件保存到物理机（`/host/data/`）
+5. **消息推送**: 以JSONL格式推送到Redis Stream
+
+**视觉兜底流程**（当AT-SPI失败时）:
 - **Producer1 (Observer)**: 监控微信群消息界面，检测新消息气泡，返回小截图 + 气泡像素位置
 - **Producer2 (Content Fetcher)**: 根据气泡位置点击获取高精度内容（高清图片/文本），返回精确内容
-- **Redis Stream**: 使用Redis Streams作为消息队列，支持消息持久化和多消费者
-- **FastAPI Server**: 提供SSE流式端点，将precise队列消息实时推送
 
-### 数据流
+**数据流（AT-SPI模式）**:
+```
+微信UI控件树 (AT-SPI)
+    ↓ [AT-SPI Observer - UI控件监听]
+消息列表变化检测
+    ↓ [Universal Message Extractor - 点击消息判断类型]
+窗口检测与类型判断
+    ↓ [媒体保存到物理机]
+Redis Stream (stream_precise)
+    ↓ [FastAPI SSE端点 - JSONL格式]
+monitor_agent.py (SSE消费)
+```
 
+**数据流（视觉兜底模式）**:
 ```
 微信群界面 (Linux微信)
     ↓ [Producer1 - 观察者]
@@ -608,21 +646,37 @@ monitor:
 
 ### 服务文件说明
 
-- `services/wechat_sandbox/core/queue/manager.py`: Redis队列管理器（使用Redis Streams）
-- `services/wechat_sandbox/core/producer/observer.py`: 生产者1 - 消息观察者
-- `services/wechat_sandbox/core/producer/content_fetcher.py`: 生产者2 - 内容获取者
+**核心模块（v2.0新架构）**:
+- `services/wechat_sandbox/core/atspi/observer.py`: AT-SPI观察者，监听微信UI控件树变化
+- `services/wechat_sandbox/core/message/extractor.py`: 通用消息提取器，点击消息判断类型
+- `services/wechat_sandbox/core/window/manager.py`: 窗口管理器，检测和操作窗口
+- `services/wechat_sandbox/core/producer/hybrid.py`: 混合生产者，协调AT-SPI和视觉方案
+
+**保留模块（视觉兜底方案）**:
+- `services/wechat_sandbox/core/producer/observer.py`: 生产者1 - 消息观察者（视觉方案）
+- `services/wechat_sandbox/core/producer/content_fetcher.py`: 生产者2 - 内容获取者（视觉方案）
 - `services/wechat_sandbox/core/producer/monitor.py`: 视觉监控器（Linux微信版本）
 - `services/wechat_sandbox/core/detector/detector.py`: 变化检测器
 - `services/wechat_sandbox/core/extractor/extractor.py`: 内容提取器（Linux微信版本）
 - `services/wechat_sandbox/core/classifier/classifier.py`: 消息类型分类器
+
+**通用模块**:
+- `services/wechat_sandbox/core/queue/manager.py`: Redis队列管理器（使用Redis Streams）
 - `services/wechat_sandbox/api/__init__.py`: FastAPI应用入口（含Web管理接口）
 - `services/wechat_sandbox/utils/logger.py`: 日志工具
 - `services/wechat_sandbox/utils/config.py`: 配置工具
 - `services/wechat_sandbox/main.py`: 服务启动脚本
+
+**Docker配置**:
 - `docker/scripts/start_wechat.sh`: 容器启动脚本（VNC/noVNC初始化）
 - `docker/compose/docker-compose.yml`: 单实例Docker编排配置
 - `docker/compose/docker-compose.multi.yml`: 多实例Docker编排配置
 - `docker/sandbox/Dockerfile`: 生产者服务镜像构建（含VNC/noVNC）
+
+**文档**:
+- `services/wechat_sandbox/README.md`: 微信沙盒详细文档（v2.0）
+- `services/wechat_sandbox/DIRECTORY_STRUCTURE.md`: 目录结构说明
+- `services/wechat_sandbox/core/producer/SSE_MESSAGE_MODEL.md`: SSE JSONL数据模型文档
 
 ## 扩展性
 

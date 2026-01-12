@@ -24,9 +24,33 @@ Mutil_Agent_WechatGroup_RPA/
 ├── scripts/             # 部署、初始化脚本
 ├── services/            # 服务模块
 │   ├── orchestrator/   # FastAPI协调中心
-│   └── wechat_sandbox/  # 微信沙盒（双生产者架构）
+│   └── wechat_sandbox/  # 微信沙盒（AT-SPI混合方案 + 通用消息提取）⭐
 └── pyproject.toml       # Python项目配置
 ```
+
+### 微信沙盒目录结构（2025-01-12更新）
+```
+services/wechat_sandbox/
+├── core/                            # 核心业务逻辑
+│   ├── atspi/                       # AT-SPI模块 ⭐ 新结构
+│   │   ├── observer.py              # AT-SPI观察者
+│   │   ├── chat_listener.py         # 聊天窗口监听器
+│   │   └── global_listener.py       # 全局聊天监听器
+│   ├── message/                     # 消息处理模块 ⭐ 新结构
+│   │   ├── extractor.py             # 通用消息提取器
+│   │   └── models.py                # 消息数据模型
+│   ├── window/                      # 窗口管理模块 ⭐ 新结构
+│   ├── producer/                    # 生产者模块
+│   │   ├── hybrid_producer.py       # 混合生产者（AT-SPI + 视觉）
+│   │   ├── observer.py              # 视觉观察者
+│   │   └── content_fetcher.py       # 内容提取器
+│   ├── detector/                    # 视觉检测模块
+│   └── extractor/                   # 内容提取模块
+├── api/                             # FastAPI接口
+└── utils/                           # 工具类
+```
+
+详细说明见：`services/wechat_sandbox/DIRECTORY_STRUCTURE.md`
 
 ## 开发规则（必须遵守）
 
@@ -42,11 +66,23 @@ Mutil_Agent_WechatGroup_RPA/
 - 时间字段使用datetime类型，序列化为ISO格式字符串
 - 图像路径使用相对路径（相对于data目录）
 
-### 消息处理规范
-- 原始消息结构：id、sender、content、type、timestamp、image_path
-- 消息类型枚举：TEXT、IMAGE、VIDEO、FILE、MIXED
+### 消息处理规范（2025-01-12更新）
+- 原始消息结构：id、sender、content、type、timestamp、image_path、high_res_image_path
+- 消息类型枚举：TEXT、IMAGE、VIDEO、FILE、MIXED、**PHOTO** ⭐ 新增
 - 任务类型枚举：WORK_REPORT、TASK_ASSIGNMENT、STATUS_UPDATE、OTHER
 - 任务阶段枚举：BEFORE、DURING、AFTER、UNKNOWN
+
+### 通用消息提取规范（2025-01-12新增）
+- **点击所有消息判断类型**：不预判类型，统一点击处理
+- **窗口检测机制**：根据是否唤起新窗口判断消息类型
+- **窗口标题映射**：
+  - 无窗口 → text
+  - "Photos and Videos" → photo/video
+  - "File Transfer" → file
+  - "Browser" → link
+  - 其他 → other
+- **文件保存**：自动保存到物理机挂载目录 `/host/data/`
+- **SSE推送格式**：使用JSONL格式，每行一个完整JSON对象
 
 ### AI模型调用规范
 - 意图识别使用Qwen3-72B（temperature: 0.1, max_tokens: 100）
@@ -65,7 +101,74 @@ Mutil_Agent_WechatGroup_RPA/
 - 日志级别：ERROR（功能异常）、WARN（潜在问题）、INFO（关键业务节点）、DEBUG（调试信息）
 - 必须添加日志的位置：try-catch的catch块、外部调用前后、业务入口、状态变更、重要条件分支
 
+### 导入路径规范（2025-01-12更新）
+```python
+# AT-SPI相关（新路径）
+from core.atspi.observer import ATSPIObserver
+from core.atspi.chat_listener import ChatWindowListener
+from core.atspi.global_listener import GlobalChatListener
+
+# 消息处理（新路径）
+from core.message.extractor import UniversalMessageExtractor, MessageType
+
+# 生产者（更新路径）
+from core.producer.hybrid_producer import HybridProducer, ProductionMode
+```
+
 ## 架构约定
+
+### 微信沙盒架构演进（2025-01-12更新）
+
+#### 阶段一：双生产者架构（早期）
+- Producer1（Observer）：检测气泡生成小截图，推送到原始队列
+- Producer2（ContentFetcher）：从原始队列消费，精确定位并提取内容，推送到精确队列
+- 限制：依赖固定界面区域，界面变动导致采集失败
+
+#### 阶段二：AT-SPI混合方案（推荐）
+- 主要方案：AT-SPI UI控件监听
+- 兜底方案：视觉技术（自动降级）
+- 优势：速度快、资源占用少、准确率高
+- SSE流接口：/api/stream/messages流式推送精确消息
+
+#### 阶段三：通用消息提取（当前）⭐
+- 点击所有消息判断类型（不预判）
+- 根据窗口标题自动分类
+- 文件自动保存到物理机
+- 支持类型：text、photo、video、file、link、other
+
+### 通用消息提取工作流程（2025-01-12新增）
+```
+1. 检测新消息（AT-SPI观察者）
+   ↓
+2. 点击消息（所有消息）
+   ↓
+3. 检测是否唤起新窗口
+   ├─ 否 → 文本消息 (text)
+   └─ 是 → 继续判断
+           ↓
+       获取窗口标题
+           ↓
+       ├─ "Photos and Videos" → 图片/视频 (photo/video)
+       ├─ "File Transfer" → 文件 (file)
+       ├─ "Browser" → 链接 (link)
+       └─ 其他 → 其他类型 (other)
+                  ↓
+              保存到物理机 (/host/data/)
+                  ↓
+              推送SSE (JSONL格式)
+```
+
+### SSE消息格式（2025-01-12更新）
+- **格式**：JSONL（JSON Lines），每行一个完整JSON对象
+- **编码**：UTF-8
+- **前缀**：`data: `
+- **示例**：
+  ```
+  data: {"id":"msg_001","type":"text","sender":"张三","content":{"text":"hello"},"window_detected":false,...}
+  data: {"id":"msg_002","type":"photo","sender":"李四","content":{"high_res_media_path":"/host/data/photo.png"},"window_detected":true,...}
+  ```
+
+完整数据模型见：`services/wechat_sandbox/core/producer/SSE_MESSAGE_MODEL.md`
 
 ### Orchestrator-Worker架构模式
 - Orchestrator：LangGraph工作流引擎负责任务编排和状态管理
@@ -81,11 +184,6 @@ Entry → monitor → multimodal → state_tracker → document → END
                                     Yes → document
                                     No → END
 ```
-
-### 微信沙盒双生产者架构
-- Producer1（Observer）：检测气泡生成小截图，推送到原始队列
-- Producer2（ContentFetcher）：从原始队列消费，精确定位并提取内容，推送到精确队列
-- SSE流接口：/api/stream/messages流式推送精确消息
 
 ### 多模态分析流程
 - MultimodalNode接收RawMessage，调用Qwen3-VL-8B分析图文内容
@@ -115,6 +213,47 @@ Entry → monitor → multimodal → state_tracker → document → END
 - 其他Agent：专注于各自的业务逻辑，保持职责单一
 
 ## 历史决策记录
+
+### 微信沙盒目录结构重组（2025-01-12）
+- 问题描述：所有实现都堆在`core/producer/`中，职责不清晰，难以维护
+- 决策：按功能模块重组目录结构
+  - 新建`core/atspi/`：AT-SPI相关功能（observer、chat_listener、global_listener）
+  - 新建`core/message/`：消息处理功能（extractor、models）
+  - 新建`core/window/`：窗口管理功能（待扩展）
+  - 保留旧文件作为备份
+- 影响：
+  - 新增`services/wechat_sandbox/core/atspi/`目录
+  - 新增`services/wechat_sandbox/core/message/`目录
+  - 新增`services/wechat_sandbox/core/window/`目录
+  - 新增`services/wechat_sandbox/DIRECTORY_STRUCTURE.md`文档
+  - 更新导入路径：`from core.atspi.observer import ATSPIObserver`
+  - 更新`services/wechat_sandbox/README.md`
+
+### 通用消息提取实现（2025-01-12）
+- 问题描述：需要自动识别消息类型并提取媒体文件
+- 决策：实现通用消息提取逻辑
+  - 点击所有消息判断类型（不预判）
+  - 根据窗口标题自动分类（text/photo/video/file/link/other）
+  - 文件自动保存到物理机
+  - SSE推送改为JSONL格式
+- 影响：
+  - 新增`core/message/extractor.py`：通用消息提取器
+  - 新增`core/producer/SSE_MESSAGE_MODEL.md`：SSE数据模型文档
+  - 新增`core/producer/sse_message_model.jsonl`：JSONL格式示例
+  - 新增`core/producer/UNIVERSAL_MESSAGE_EXTRACTION.md`：实现说明文档
+  - 更新`core/schemas.py`：添加PHOTO类型和high_res_image_path字段
+  - 更新`atspi_observer.py`：集成通用消息提取
+
+### SSE推送格式改为JSONL（2025-01-12）
+- 问题描述：原有SSE推送格式不够清晰，需要更标准化的格式
+- 决策：使用JSONL（JSON Lines）格式
+  - 每行一个完整的JSON对象
+  - 便于解析和处理
+  - 支持多种消息类型（text/photo/video/file/link/other）
+- 影响：
+  - 更新SSE推送逻辑
+  - 新增完整的数据模型定义
+  - 更新`ExtractedMessage.to_sse_json()`方法
 
 ### 前端管理员监控界面实现（2025-01-11）
 - 问题描述：管理员无法从前端实时监控微信沙盒容器状态和工作流运行状态
@@ -175,3 +314,19 @@ Entry → monitor → multimodal → state_tracker → document → END
 ### 阶段三：多用户场景（远期）
 - 核心功能：用户管理、数据隔离、多实例沙盒
 - 扩展：支持多用户并发访问、独立任务配置
+
+## 技术文档索引
+
+### 核心文档
+- [项目架构文档](docs/架构设计文档v3.md)
+- [目录结构详细说明](services/wechat_sandbox/DIRECTORY_STRUCTURE.md)
+- [SSE消息数据模型](services/wechat_sandbox/core/producer/SSE_MESSAGE_MODEL.md)
+
+### AT-SPI相关
+- [AT-SPI混合方案说明](docs/atspi_hybrid_solution.md)
+- [AT-SPI部署配置](docs/atspi_deployment_config.md)
+- [通用消息提取说明](services/wechat_sandbox/core/producer/UNIVERSAL_MESSAGE_EXTRACTION.md)
+
+### Docker相关
+- [Docker主文档](docker/README.md)
+- [脚本说明](docker/scripts/README.md)

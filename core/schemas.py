@@ -9,6 +9,7 @@ class MessageType(str, Enum):
     TEXT = "text"
     IMAGE = "image"
     MIXED = "mixed"
+    PHOTO = "photo"  # 微信Photo消息类型（需要点击打开查看高清图）
 
 
 class TaskType(str, Enum):
@@ -34,7 +35,8 @@ class RawMessage(BaseModel):
     sender: str
     content: str
     message_type: MessageType
-    image_path: Optional[str] = None
+    image_path: Optional[str] = None  # 缩略图路径（普通图片）或预览图路径（photo消息）
+    high_res_image_path: Optional[str] = None  # 高清图片路径（仅photo消息使用）
     group_id: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
