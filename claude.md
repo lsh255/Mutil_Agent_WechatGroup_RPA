@@ -342,3 +342,26 @@ Entry → monitor → multimodal → state_tracker → document → END
 ### Docker相关
 - [Docker主文档](docker/README.md)
 - [脚本说明](docker/scripts/README.md)
+
+---
+
+## 历史决策记录
+
+### 微信沙盒依赖问题修复（2025-01-14）
+- 问题描述：wechat_sandbox/ 模块存在多个路径引用错误和类名冲突
+- 决策：全面修复依赖问题
+  - 修复文档中的错误导入路径（`core.message` → `core.extractor`）
+  - 重命名 `detector.py` 的 `ChangeDetector` 为 `BubbleDetector`，避免与 `change_detector.py` 冲突
+  - 扩展 `change_detector.py` 添加 `detect_image_change()` 方法（区分图片/视频）
+  - 扩展 `visual_monitor.py` 添加 `capture_window_area()` 方法（窗口区域截图）
+  - `message_extractor.py` 复用 `detector/` 模块，删除重复代码
+  - 标记废弃文件：`services/producer_service.py`、`core/extractor/extractor.py`
+- 影响：
+  - 更新 `services/wechat_sandbox/README.md`
+  - 更新 `services/wechat_sandbox/core/README.md`
+  - 更新 `docs/MESSAGE_TYPES.md`
+  - 更新 `docs/AT_SPI_GUIDE.md`
+  - 更新 `CHANGELOG_v2.0.md`
+  - 更新项目根目录 `README.md` 和 `架构设计文档v3.md`
+  - 更新导入路径规范：`from core.extractor import ...`（不再使用 `core.message`）
+  - **重要变更**：`core/window/` 模块已移除，功能整合到 `core/extractor/` 和 `core/detector/`

@@ -33,17 +33,22 @@
 
 ### 微信沙盒架构
 
-微信沙盒采用分层架构设计（v2.0 - AT-SPI混合架构）：
+微信沙盒采用分层架构设计（v2.1 - AT-SPI混合架构）：
 
 - **API接口层 (`api/`)**: FastAPI路由，提供REST API和SSE流式接口
 - **核心业务逻辑层 (`core/`)**: 包含消息生产者、队列管理、AT-SPI监听、消息提取等核心模块
   - **AT-SPI模块 (`core/atspi/`)**: AT-SPI UI控件监听和消息观察
-  - **消息处理模块 (`core/message/`)**: 通用消息提取、分类和模型定义
-  - **窗口管理模块 (`core/window/`)**: 窗口检测、交互和自动化操作
+  - **消息提取模块 (`core/extractor/`)** ⭐v2.1: 通用消息提取、分类和模型定义
   - **生产者模块 (`core/producer/`)**: 混合生产者（AT-SPI + 视觉方案）
-  - **视觉检测模块 (`core/detector/`)**: 基于视觉的消息检测（兜底方案）
+  - **视觉检测模块 (`core/detector/`)**: 基于视觉的消息检测（兜底方案）⭐v2.1
+- **配置管理 (`config/`)** ⭐v2.0: 独立的配置管理模块
 - **服务编排层 (`services/`)**: 统一管理组件生命周期和服务编排
 - **工具模块 (`utils/`)**: 配置管理、日志记录、跨平台适配等工具函数
+
+**v2.1 更新**：
+- 消息提取模块从 `core/message/` 重命名为 `core/extractor/`
+- detector/ 模块功能扩展：支持图像变化检测（区分图片/视频）和窗口区域截图
+- 修复类名冲突：`detector.py` 的 `ChangeDetector` 重命名为 `BubbleDetector`
 
 **核心特性**:
 - **AT-SPI优先**: 使用Linux AT-SPI (Assistive Technology Service Provider Interface) 直接访问微信UI控件树

@@ -41,7 +41,7 @@ class TestATSPIFullWorkflow:
         7. 停止监听
         """
         from services.wechat_sandbox.core.atspi.observer import ATSPIObserver
-        from services.wechat_sandbox.core.extractor.extractor import UniversalMessageExtractor
+        from services.wechat_sandbox.core.extractor import UniversalMessageExtractor
 
         # 1. 初始化观察者
         observer = ATSPIObserver()
@@ -106,7 +106,7 @@ class TestATSPIFullWorkflow:
         3. SSE 从 Redis 读取并推送
         """
         from services.wechat_sandbox.core.atspi.observer import ATSPIObserver
-        from services.wechat_sandbox.core.extractor.extractor import UniversalMessageExtractor
+        from services.wechat_sandbox.core.extractor import UniversalMessageExtractor
 
         # 初始化观察者
         observer = ATSPIObserver()
@@ -156,7 +156,7 @@ class TestATSPIFullWorkflow:
         observer.add_callback(callback2)
 
         # 手动触发回调
-        from services.wechat_sandbox.core.extractor.extractor import Message
+        from services.wechat_sandbox.core.extractor.models import ExtractedMessage as Message
         test_message = Message(
             sender="TestUser",
             content="Test message",
@@ -193,7 +193,7 @@ class TestATSPIFullWorkflow:
         observer.remove_callback(callback)
 
         # 手动触发
-        from services.wechat_sandbox.core.extractor.extractor import Message
+        from services.wechat_sandbox.core.extractor.models import ExtractedMessage as Message
         test_message = Message(
             sender="TestUser",
             content="Test message",
@@ -224,7 +224,7 @@ class TestATSPIMessageTypes:
         测试文本消息检测
         """
         from services.wechat_sandbox.core.atspi.observer import ATSPIObserver
-        from services.wechat_sandbox.core.extractor.extractor import MessageType
+        from services.wechat_sandbox.core.extractor.models import MessageType, ExtractedMessage
 
         observer = ATSPIObserver()
         if not observer.initialize():
@@ -245,7 +245,7 @@ class TestATSPIMessageTypes:
         测试图片消息检测
         """
         from services.wechat_sandbox.core.atspi.observer import ATSPIObserver
-        from services.wechat_sandbox.core.extractor.extractor import MessageType
+        from services.wechat_sandbox.core.extractor.models import MessageType, ExtractedMessage
 
         observer = ATSPIObserver()
         if not observer.initialize():
@@ -266,7 +266,7 @@ class TestATSPIMessageTypes:
         测试视频消息检测
         """
         from services.wechat_sandbox.core.atspi.observer import ATSPIObserver
-        from services.wechat_sandbox.core.extractor.extractor import MessageType
+        from services.wechat_sandbox.core.extractor.models import MessageType, ExtractedMessage
 
         observer = ATSPIObserver()
         if not observer.initialize():
