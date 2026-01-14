@@ -1,21 +1,33 @@
 """
-生产者服务编排层
-协调消息生产的核心组件，包括：
-- Observer: 观察者，负责检测消息气泡
-- ContentFetcher: 内容获取器，负责提取消息内容
-- Classifier: 消息分类器，负责识别消息类型
+生产者服务编排层（已废弃）
+
+⚠️ 此文件已废弃，原因是：
+- 导入的模块不存在（core.producer.monitor, core.producer.observer 等）
+- 功能已被 HybridProducer 替代
+- 请使用 core.producer.hybrid_producer.HybridProducer
+
+保留此文件仅用于历史参考，请勿在新代码中使用。
 """
 
-import threading
-from utils.logger import logger
-from core.producer.monitor import VisualMonitor
-from core.producer.observer import Observer
-from core.producer.content_fetcher import ContentFetcher
-from core.detector import ChangeDetector, BoundaryDetector
-from core.classifier import MessageTypeClassifier
-from core.extractor import PrecisionContentFetcher
+# 以下导入已失效，注释掉以避免 ImportError
+# import threading
+# from utils.logger import logger
+# from core.producer.monitor import VisualMonitor
+# from core.producer.observer import Observer
+# from core.producer.content_fetcher import ContentFetcher
+# from core.detector import ChangeDetector, BoundaryDetector
+# from core.classifier import MessageTypeClassifier
+# from core.extractor import PrecisionContentFetcher
+
+import warnings
+warnings.warn(
+    "ProducerService 已废弃，请使用 HybridProducer 替代。",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
+# 以下类已废弃，保留仅用于历史参考
 class ProducerService:
     """
     生产者服务类

@@ -21,10 +21,10 @@ class TestChangeDetector:
     @pytest.fixture
     def detector(self):
         """
-        创建检测器实例
+        创建检测器实例（气泡检测器）
         """
-        from core.detector.detector import ChangeDetector
-        return ChangeDetector()
+        from core.detector.detector import BubbleDetector
+        return BubbleDetector()
 
     @pytest.fixture
     def mock_images(self):

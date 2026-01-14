@@ -78,8 +78,10 @@ services/wechat_sandbox/
 │   │
 │   ├── extractor/                  # 消息提取模块 ⭐ 整合
 │   │   ├── __init__.py
-│   │   ├── message_extractor.py    # 通用消息提取器
-│   │   └── models.py                # 消息数据模型
+│   │   ├── message_extractor.py    # 通用消息提取器（主要实现）
+│   │   ├── models.py                # 消息数据模型
+│   │   ├── text_extractor.py        # 文本提取器（辅助）
+│   │   └── extractor.py             # 已废弃 ⚠️
 │   │
 │   ├── producer/                   # 生产者模块（简化）
 │   │   ├── __init__.py
@@ -91,10 +93,10 @@ services/wechat_sandbox/
 │   │
 │   └── detector/                   # 视觉检测模块
 │       ├── __init__.py
-│       ├── change_detector.py       # 变化检测
-│       ├── classifier.py            # 视觉分类器
-│       ├── detector.py              # 检测器
-│       └── visual_monitor.py        # 视觉监控
+│       ├── change_detector.py       # 变化检测（区分图片/视频）⭐v2.1
+│       ├── classifier.py            # 视觉分类器（已废弃）
+│       ├── detector.py              # 气泡检测器（BubbleDetector）⭐v2.1
+│       └── visual_monitor.py        # 视觉监控（窗口区域截图）⭐v2.1
 │
 ├── api/                            # API 模块
 │   ├── __init__.py
@@ -105,7 +107,7 @@ services/wechat_sandbox/
 │
 ├── services/                       # 服务模块
 │   ├── __init__.py
-│   └── producer_service.py         # 生产者服务
+│   └── producer_service.py         # 生产者服务（已废弃）⚠️
 │
 ├── utils/                          # 工具类
 │   ├── __init__.py
@@ -166,7 +168,26 @@ from core.atspi.global_listener import GlobalChatListener
 from core.extractor import UniversalMessageExtractor, MessageType, ExtractedMessage
 ```
 
-### Producer 模块 (core/producer/)
+### Detector 模块 (core/detector/)
+
+视觉检测模块，支持图像变化检测和消息气泡检测。
+
+| 模块 | 说明 | 用途 | 状态 |
+|------|------|------|------|
+| `change_detector.py` | 变化检测器 | 区分图片和视频 | ✅ 稳定 ⭐v2.1 |
+| `detector.py` | 气泡检测器 | 检测消息气泡边界 | ✅ 稳定 ⭐v2.1 |
+| `visual_monitor.py` | 视觉监控器 | 窗口截图和定位 | ✅ 稳定 ⭐v2.1 |
+| `classifier.py` | 视觉分类器 | 分类消息类型 | ⚠️ 已废弃 |
+
+**导入路径：**
+```python
+from core.detector.change_detector import ChangeDetector      # 图像变化检测
+from core.detector.detector import BubbleDetector             # 气泡检测
+from core.detector.detector import BoundaryDetector          # 边界扩展
+from core.detector.visual_monitor import VisualMonitor        # 窗口监控
+```
+
+**注意**：v2.1 修复了类名冲突，`detector.py` 中的 `ChangeDetector` 已重命名为 `BubbleDetector`。
 
 消息生产者模块，负责任务编排和队列管理。
 
@@ -506,6 +527,18 @@ docker exec -it wechat_sandbox_test ls -la /host/data
 - [Docker 主文档](../../docker/README.md)
 
 ## 版本历史
+
+### 2025-01-14 (v2.1) ⭐ 最新
+- ✅ **修复依赖问题**
+  - 修复 `detector/` 模块的类名冲突（ChangeDetector → BubbleDetector）
+  - 修复文档中的错误导入路径（`core.message` → `core.extractor`）
+  - 标记废弃文件（`services/producer_service.py`, `core/extractor/extractor.py`）
+- ✅ **扩展 detector/ 模块功能**
+  - `change_detector.py` 新增 `detect_image_change()` 方法（区分图片/视频）
+  - `visual_monitor.py` 新增 `capture_window_area()` 方法（窗口区域截图）
+- ✅ **代码复用优化**
+  - `message_extractor.py` 复用 `detector/` 模块，删除重复代码
+  - 删除冗余的 `producer/visual_*.py` 文件
 
 ### 2025-01-14 (v2.0)
 - ⭐ **目录结构重整**

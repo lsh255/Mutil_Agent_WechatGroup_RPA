@@ -16,43 +16,56 @@ from utils.logger import logger
 router = APIRouter()
 
 queue_manager = None
+redis_client = None
+precise_queue = "wechat:messages:precise"
 
 
 def set_queue_manager(qm):
+    """设置队列管理器（向后兼容）"""
     global queue_manager
     queue_manager = qm
+    # 如果传入的是 HybridProducer，提取其 Redis 客户端
+    if hasattr(qm, 'redis'):
+        global redis_client
+        redis_client = qm.redis
 
 
 async def message_stream_generator() -> AsyncGenerator[str, None]:
     """
     SSE消息流生成器
-    
+
     从Redis Stream读取消息并流式输出
     """
     last_id = '0-0'
-    
+
     try:
         while True:
-            if queue_manager:
-                messages = queue_manager.read_precise_for_streaming(count=10)
+            if redis_client:
+                # 从 Redis Stream 读取消息
+                messages = redis_client.xrange(
+                    precise_queue,
+                    min=last_id,
+                    count=10
+                )
                 
-                for message in messages:
-                    message_id = message.get('redis_id', 'unknown')
-                    
+                for message_id, fields in messages:
+                    # 更新 last_id
                     if message_id > last_id:
                         last_id = message_id
-                        
-                        message_json = json.dumps({
-                            'id': message.get('id'),
-                            'timestamp': message.get('timestamp'),
-                            'type': message.get('type'),
-                            'position': message.get('position'),
-                            'precise_content': message.get('precise_content', {}),
-                            'metadata': message.get('metadata', {})
-                        }, ensure_ascii=False)
-                        
+
+                        # 解析消息字段（Redis Stream 字段需要从 JSON 解析）
+                        parsed_message = {}
+                        for key, value in fields.items():
+                            try:
+                                parsed_message[key] = json.loads(value)
+                            except (json.JSONDecodeError, TypeError):
+                                parsed_message[key] = value
+
+                        # 构造 SSE 消息
+                        message_json = json.dumps(parsed_message, ensure_ascii=False)
+
                         yield f"data: {message_json}\n\n"
-                        logger.info(f"Streamed message: {message.get('id')}")
+                        logger.info(f"Streamed message: {message_id}")
             
             await asyncio.sleep(0.5)
             

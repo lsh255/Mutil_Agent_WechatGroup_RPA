@@ -92,7 +92,7 @@ if observer.initialize():
 
 **代码实现**：
 ```python
-from core.message.extractor import UniversalMessageExtractor
+from core.extractor import UniversalMessageExtractor
 
 # 独立使用视觉方案提取器
 extractor = UniversalMessageExtractor(save_dir="/host/data")
@@ -203,7 +203,7 @@ observer = ATSPIObserver(enable_universal_extraction=False)
 
 ```python
 # 场景2：独立使用视觉提取器
-from core.message.extractor import UniversalMessageExtractor
+from core.extractor import UniversalMessageExtractor
 
 extractor = UniversalMessageExtractor(save_dir="/host/data")
 # 对特定消息进行提取

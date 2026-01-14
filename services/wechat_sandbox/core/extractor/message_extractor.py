@@ -10,9 +10,15 @@
 1. 所有消息先尝试点击
 2. 检测是否唤起新窗口
 3. 根据窗口标题判断消息类型：
-   - 无窗口 → 文本消息 (text)
-   - "Photos and Videos" → 图片/视频 (photo/video)
+   - 无窗口 → 文本消息
+   - "Photos and Videos" → 图片/视频
+     - 通过窗口内容变化检测区分（复用 detector/ 模块）
+       * 画面不变 → 图片
+       * 画面变化 → 视频
    - 其他窗口 → 文件/链接等，保存到物理机
+
+新增功能（v2.1）：
+- 窗口内容变化检测：区分图片和视频（复用 detector/ 模块）
 """
 
 import time
@@ -110,6 +116,13 @@ class UniversalMessageExtractor:
         # 创建目录
         for dir_path in [self.photos_dir, self.videos_dir, self.others_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
+
+        # 初始化 detector 模块
+        from core.detector.visual_monitor import VisualMonitor
+        from core.detector.change_detector import ChangeDetector
+
+        self.visual_monitor = VisualMonitor()
+        self.change_detector = ChangeDetector()
 
         logger.info(f"消息提取器初始化，保存目录: {self.save_dir}")
 
@@ -311,12 +324,74 @@ class UniversalMessageExtractor:
             logger.error(f"等待新窗口失败: {e}")
             return None
 
-    def determine_message_type(self, window_title: str) -> MessageType:
+    def determine_message_type_by_content(self, window_info: Dict) -> MessageType:
+        """
+        通过窗口内容变化判断是图片还是视频（复用 detector 模块）
+
+        Args:
+            window_info: 窗口信息
+
+        Returns:
+            MessageType: PHOTO 或 VIDEO
+        """
+        try:
+            # 获取窗口坐标
+            window_bounds = self.get_message_bounds(window_info['obj'])
+            if not window_bounds:
+                logger.warning("无法获取窗口坐标，默认为图片")
+                return MessageType.PHOTO
+
+            logger.info("开始窗口内容变化检测（复用 detector 模块）...")
+
+            # 采样配置
+            num_samples = 3
+            sample_interval = 0.5  # 秒
+
+            screenshots = []
+
+            # 多次采样（使用 VisualMonitor）
+            for i in range(num_samples):
+                time.sleep(sample_interval)
+                screenshot = self.visual_monitor.capture_window_area(window_bounds)
+                if screenshot is not None:
+                    screenshots.append(screenshot)
+                    logger.debug(f"已采集第 {i+1} 张截图")
+                else:
+                    logger.warning(f"第 {i+1} 次截图失败")
+
+            # 如果采样不足，默认为图片
+            if len(screenshots) < 2:
+                logger.warning("采样数量不足，默认为图片")
+                return MessageType.PHOTO
+
+            # 对比相邻截图（使用 ChangeDetector）
+            changes = []
+            for i in range(len(screenshots) - 1):
+                is_changed = self.change_detector.detect_image_change(screenshots[i], screenshots[i+1])
+                changes.append(is_changed)
+                logger.debug(f"截图 {i+1} -> {i+2} 变化: {is_changed}")
+
+            # 判断结果
+            has_change = any(changes)
+
+            if has_change:
+                logger.info("✅ 检测到窗口内容变化 → 判断为视频")
+                return MessageType.VIDEO
+            else:
+                logger.info("✅ 窗口内容无变化 → 判断为图片")
+                return MessageType.PHOTO
+
+        except Exception as e:
+            logger.error(f"窗口内容变化检测失败: {e}，默认为图片")
+            return MessageType.PHOTO
+
+    def determine_message_type(self, window_title: str, window_info: Optional[Dict] = None) -> MessageType:
         """
         根据窗口标题判断消息类型（仅text/photo/video）
 
         Args:
             window_title: 窗口标题
+            window_info: 窗口信息（用于内容变化检测）
 
         Returns:
             MessageType: 消息类型（text/photo/video/other）
@@ -326,11 +401,16 @@ class UniversalMessageExtractor:
 
         title_lower = window_title.lower()
 
-        # Photos and Videos窗口 → photo或video
+        # Photos and Videos窗口 → 通过内容变化判断是 photo 还是 video
         if any(keyword in title_lower for keyword in ['photos and videos', 'photos', 'videos']):
-            # 需要进一步判断是图片还是视频
-            # 这里先默认为PHOTO，后续可以根据内容判断
-            return MessageType.PHOTO
+            if window_info:
+                # 使用窗口内容变化检测
+                logger.info("检测到 'Photos and Videos' 窗口，启用内容变化检测...")
+                return self.determine_message_type_by_content(window_info)
+            else:
+                # 如果没有窗口信息，默认为图片（向后兼容）
+                logger.warning("缺少窗口信息，默认为图片")
+                return MessageType.PHOTO
 
         # 其他窗口 → 标记为OTHER，保存到物理机
         # 包括：File Transfer、Browser等
@@ -530,9 +610,9 @@ class UniversalMessageExtractor:
                 # 没有新窗口 → 文本消息
                 return self._create_text_message(msg_id, timestamp, sender, processed_at)
 
-            # 步骤4: 根据窗口标题判断类型
+            # 步骤4: 根据窗口标题和内容判断类型
             window_title = new_window['name']
-            msg_type = self.determine_message_type(window_title)
+            msg_type = self.determine_message_type(window_title, window_info=new_window)
 
             logger.info(f"窗口标题: {window_title}, 消息类型: {msg_type.value}")
 

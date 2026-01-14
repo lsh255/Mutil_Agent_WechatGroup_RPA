@@ -4,6 +4,7 @@
 1. 定位微信窗口
 2. 定义消息监控区域（ROI）
 3. 抓取ROI区域截图
+4. 抓取指定窗口区域截图（用于消息类型判断）
 """
 
 import threading
@@ -176,7 +177,41 @@ class VisualMonitor:
                 return rect
             
             return None
-            
+
         except Exception as e:
             logger.error(f"Error getting window geometry: {e}")
+            return None
+
+    def capture_window_area(self, window_bounds: Dict[str, int]) -> Optional[Image.Image]:
+        """
+        截取指定窗口区域（用于消息类型判断）
+
+        Args:
+            window_bounds: 窗口坐标字典 {x, y, width, height}
+
+        Returns:
+            Optional[Image.Image]: 截图图像，失败返回None
+        """
+        try:
+            x = window_bounds.get('x', 0)
+            y = window_bounds.get('y', 0)
+            width = window_bounds.get('width', 0)
+            height = window_bounds.get('height', 0)
+
+            # 验证坐标
+            if x < 0 or y < 0 or width <= 0 or height <= 0:
+                logger.error(f"无效的窗口坐标: {window_bounds}")
+                return None
+
+            # 截取指定区域
+            screenshot = ImageGrab.grab(bbox=(x, y, x + width, y + height))
+
+            if screenshot is None or screenshot.size == (0, 0):
+                logger.warning("截取的窗口区域为空")
+                return None
+
+            return screenshot
+
+        except Exception as e:
+            logger.error(f"截取窗口区域失败: {e}")
             return None

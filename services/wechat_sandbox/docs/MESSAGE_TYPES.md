@@ -94,7 +94,7 @@ if observer.initialize():
 
 ### 视觉方案
 ```python
-from core.message.extractor import UniversalMessageExtractor
+from core.extractor import UniversalMessageExtractor
 
 extractor = UniversalMessageExtractor(save_dir="/host/data")
 

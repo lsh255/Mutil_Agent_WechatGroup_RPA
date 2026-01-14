@@ -24,39 +24,47 @@ producer2 = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global queue_manager, producer1, producer2
-    
+    global queue_manager, producer
+
     try:
-        from core.queue.manager import QueueManager
-        from core.producer.observer import Observer
-        from core.producer.content_fetcher import ContentFetcher
-        
+        from core.producer.hybrid_producer import HybridProducer, ProductionMode
+        import redis
+
         logger.info("Starting Producer Service...")
-        
-        queue_manager = QueueManager(config.to_dict())
-        producer1 = Observer(queue_manager)
-        producer2 = ContentFetcher(queue_manager)
-        
-        set_queue_manager(queue_manager)
-        set_components(queue_manager, producer1, producer2)
-        
-        producer1.start()
-        producer2.start()
-        
+
+        # 初始化 Redis 客户端
+        redis_client = redis.Redis(
+            host=config.REDIS_HOST,
+            port=config.REDIS_PORT,
+            db=config.REDIS_DB,
+            password=config.REDIS_PASSWORD,
+            decode_responses=True
+        )
+
+        # 初始化混合生产者（AT-SPI 优先模式）
+        producer = HybridProducer(
+            redis_client=redis_client,
+            mode=ProductionMode.ATSPI,
+            precise_queue=config.REDIS_STREAM_PRECISE,
+            save_dir=config.MEDIA_DIR
+        )
+
+        # 启动生产者
+        producer.start()
+
+        set_queue_manager(producer)
+        set_components(producer, None, None)
+
         logger.info("Producer Service started successfully")
         yield
-        
+
     except Exception as e:
         logger.error(f"Failed to start Producer Service: {e}")
         raise
     finally:
         logger.info("Shutting down Producer Service...")
-        if producer1:
-            producer1.stop()
-        if producer2:
-            producer2.stop()
-        if queue_manager:
-            queue_manager.close()
+        if producer:
+            producer.stop()
         logger.info("Producer Service stopped")
 
 

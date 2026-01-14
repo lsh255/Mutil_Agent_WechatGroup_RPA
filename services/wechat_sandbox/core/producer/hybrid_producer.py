@@ -82,11 +82,8 @@ class HybridProducer:
         # AT-SPI观察者
         self.atspi_observer = None
 
-        # 视觉观察者（原有方案）
-        self.visual_observer = None
-
-        # 视觉内容提取器（原有方案）
-        self.visual_fetcher = None
+        # 视觉方案已重构为 detector 模块，由 extractor 直接调用
+        # 不再需要 visual_observer 和 visual_fetcher
 
         # 当前活跃模式
         self.active_mode = None
@@ -120,17 +117,10 @@ class HybridProducer:
                     logger.error("AT-SPI模式初始化失败，且不允许降级")
                     return False
 
-        if self.mode in [ProductionMode.VISUAL, ProductionMode.HYBRID]:
-            # 初始化视觉方案作为兜底
-            if self._init_visual_observer():
-                if self.active_mode is None:
-                    self.active_mode = ProductionMode.VISUAL
-                    logger.info("✅ 使用视觉检测模式")
-                else:
-                    logger.info("✅ 视觉方案已就绪（作为兜底）")
-                return True
-            else:
-                logger.error("❌ 视觉方案初始化失败")
+        if self.mode == ProductionMode.VISUAL:
+            # 视觉模式已重构为 detector 模块，由 extractor 直接调用
+            logger.warning("⚠️ 纯视觉模式不可用（已重构为 detector 模块）")
+            return False
 
         return self.active_mode is not None
 
@@ -166,46 +156,16 @@ class HybridProducer:
 
     def _init_visual_observer(self) -> bool:
         """
-        初始化视觉观察者（原有方案）
+        初始化视觉观察者（兜底方案）
+
+        注意：视觉兜底方案暂时不可用。
+        已重构为使用 detector/ 模块，由 extractor 模块直接调用。
 
         Returns:
-            bool: 是否初始化成功
+            bool: False（视觉方案暂不可用）
         """
-        try:
-            # 导入原有的观察者和提取器
-            from core.producer.observer import Observer as VisualObserver
-            from core.producer.content_fetcher import ContentFetcher
-            from core.detector.visual_monitor import VisualMonitor
-            from core.detector.change_detector import ChangeDetector
-            from core.detector.detector import BubbleDetector
-
-            # 初始化视觉监控器
-            self.visual_monitor = VisualMonitor()
-
-            # 初始化变化检测器
-            self.change_detector = ChangeDetector()
-
-            # 初始化气泡检测器
-            self.bubble_detector = BubbleDetector()
-
-            # 初始化观察者
-            self.visual_observer = VisualObserver(
-                visual_monitor=self.visual_monitor,
-                change_detector=self.change_detector,
-                bubble_detector=self.bubble_detector
-            )
-
-            # 初始化内容提取器
-            self.visual_fetcher = ContentFetcher(redis_client=self.redis)
-
-            return True
-
-        except ImportError as e:
-            logger.error(f"视觉观察者导入失败: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"视觉观察者初始化失败: {e}")
-            return False
+        logger.info("视觉兜底方案暂时不可用（已重构为 detector 模块）")
+        return False
 
     def _handle_atspi_message(self, message):
         """
@@ -319,39 +279,16 @@ class HybridProducer:
             # 启动AT-SPI监听
             self.atspi_observer.start_monitoring(interval=0.5)
 
-        elif self.active_mode == ProductionMode.VISUAL and self.visual_observer:
-            # 启动视觉监听
-            self.visual_observer.start()
+        elif self.active_mode == ProductionMode.VISUAL:
+            # 视觉模式：暂时不可用
+            logger.warning("视觉模式暂时不可用（已重构为 detector 模块）")
 
         elif self.active_mode == ProductionMode.HYBRID:
-            # 混合模式：启动AT-SPI，同时监控是否需要降级
+            # 混合模式：仅启动AT-SPI，视觉方案暂时不可用
             if self.atspi_observer:
                 self.atspi_observer.start_monitoring(interval=0.5)
 
-                # 启动后台监控线程，检测AT-SPI是否持续失败
-                def monitor_atspi_health():
-                    consecutive_failures = 0
-                    max_failures = 5
-
-                    while True:
-                        time.sleep(10)
-
-                        # 检查最近的失败率
-                        if self.stats['atspi_failed'] - consecutive_failures > max_failures:
-                            logger.warning("AT-SPI持续失败，降级到视觉方案")
-                            self.atspi_observer.stop_monitoring()
-
-                            # 启动视觉方案
-                            if self.visual_observer:
-                                self.visual_observer.start()
-                                self.active_mode = ProductionMode.VISUAL
-                                break
-
-                        consecutive_failures = self.stats['atspi_failed']
-
-                import threading
-                health_monitor = threading.Thread(target=monitor_atspi_health, daemon=True)
-                health_monitor.start()
+                logger.info("视觉兜底方案暂时不可用，仅使用 AT-SPI 模式")
 
     def stop(self):
         """停止生产者"""
@@ -359,9 +296,6 @@ class HybridProducer:
 
         if self.atspi_observer:
             self.atspi_observer.stop_monitoring()
-
-        if self.visual_observer:
-            self.visual_observer.stop()
 
     def get_stats(self) -> Dict[str, Any]:
         """
@@ -375,7 +309,7 @@ class HybridProducer:
             'active_mode': self.active_mode.value if self.active_mode else None,
             'stats': self.stats,
             'atspi_available': self.atspi_observer is not None,
-            'visual_available': self.visual_observer is not None
+            'visual_available': False  # 视觉方案已重构为 detector 模块
         }
 
     def switch_mode(self, new_mode: ProductionMode):

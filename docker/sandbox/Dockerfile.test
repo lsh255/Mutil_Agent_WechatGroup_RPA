@@ -25,7 +25,7 @@
 # 使用场景：
 #   - AT-SPI 混合方案测试
 #   - UI 控件树调试
-#   - 双生产者架构验证
+#   - 混合生产者架构验证
 #   - 消息采集功能开发
 #
 # 使用的编排文件：
@@ -46,6 +46,19 @@
 #   - 必须先构建基础镜像 wechat_sandbox:latest
 #   - AT-SPI 功能需要微信应用支持辅助功能
 #   - 首次使用建议运行测试脚本验证
+#
+# 目录结构（v2.0）：
+#   services/wechat_sandbox/
+#   ├── api/          # FastAPI接口层
+#   ├── config/       # 配置管理（独立）
+#   ├── core/         # 核心业务逻辑
+#   │   ├── atspi/    # AT-SPI消息监听
+#   │   ├── extractor/# 消息内容提取器
+#   │   ├── producer/ # 消息生产者
+#   │   └── detector/ # 视觉检测（兜底）
+#   ├── services/     # 服务层
+#   ├── utils/        # 工具类
+#   └── main.py       # 入口文件
 #
 # ============================================================
 
@@ -104,7 +117,10 @@ WORKDIR /app
 # 复制 API 模块代码到容器
 COPY services/wechat_sandbox/api/ /app/api/
 
-# 复制核心业务逻辑代码到容器
+# 复制配置管理模块到容器（新增）
+COPY services/wechat_sandbox/config/ /app/config/
+
+# 复制核心业务逻辑代码到容器（包含atspi、extractor、producer、detector）
 COPY services/wechat_sandbox/core/ /app/core/
 
 # 复制工具模块到容器
@@ -113,7 +129,7 @@ COPY services/wechat_sandbox/utils/ /app/utils/
 # 复制服务模块到容器
 COPY services/wechat_sandbox/services/ /app/services/
 
-# 复制service主启动脚本到容器
+# 复制主启动脚本到容器
 COPY services/wechat_sandbox/main.py /app/main.py
 
 # 复制微信启动脚本到容器

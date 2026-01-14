@@ -34,14 +34,13 @@
 **旧导入方式**：
 ```python
 # 消息提取器
-from core.message.extractor import UniversalMessageExtractor, MessageType
-from core.message.models import ExtractedMessage
+from core.extractor import UniversalMessageExtractor, MessageType, ExtractedMessage
 
 # 配置
-from utils.config import config
+from config.config import config
 
 # 消费者
-from core.producer.agent_consumer import AgentConsumer
+from core.producer.consumer import AgentConsumer
 ```
 
 **新导入方式**：

@@ -1,7 +1,7 @@
 """
 变化检测与边界识别模块
 包含两个核心类：
-1. ChangeDetector: 负责检测屏幕内容变化，识别并定位消息气泡。
+1. BubbleDetector: 负责检测屏幕内容变化，识别并定位消息气泡。
 2. BoundaryDetector: 负责推断消息气泡的逻辑边界（包含头像、昵称等上下文）。
 """
 
@@ -11,9 +11,9 @@ from utils.logger import logger
 from config.config import config
 
 
-class ChangeDetector:
+class BubbleDetector:
     """
-    屏幕变化检测器
+    消息气泡检测器
 
     职责:
         1. 计算图像哈希 (dHash) 以检测帧间差异

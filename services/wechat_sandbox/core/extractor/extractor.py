@@ -1,19 +1,30 @@
 """
-消息内容提取模块（跨平台版本）
-负责从屏幕上提取消息的详细内容（文本或媒体）。
-包含两个类：
-1. MessageExtractor: 图像裁剪辅助类
-2. PrecisionContentFetcher: 基于自动化操作（点击/复制）的内容获取器
+消息内容提取模块（已废弃）
+
+⚠️ 此文件已废弃，原因是：
+- 导入的模块不存在（..platform.adapter）
+- 功能已被 message_extractor.py 替代
+- 请使用 core.extractor.message_extractor.UniversalMessageExtractor
+
+保留此文件仅用于历史参考，请勿在新代码中使用。
 """
 
-import time
-import cv2
-import numpy as np
-import subprocess
-import mss
-from utils.logger import logger
-from config.config import config
-from ..platform.adapter import get_adapter
+# 以下导入已失效，注释掉以避免 ImportError
+# import time
+# import cv2
+# import numpy as np
+# import subprocess
+# import mss
+# from utils.logger import logger
+# from config.config import config
+# from ..platform.adapter import get_adapter
+
+import warnings
+warnings.warn(
+    "extractor.py 已废弃，请使用 message_extractor.py 替代。",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 class MessageExtractor:
     """
