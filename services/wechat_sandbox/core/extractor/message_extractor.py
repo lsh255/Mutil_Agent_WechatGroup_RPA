@@ -3,13 +3,16 @@
 """
 通用消息提取器 - 通过点击消息判断类型并提取内容
 
+仅处理3种消息类型：文本、图片、视频
+其他类型（文件、链接、表情包等）直接保存到物理机，不通过SSE推送
+
 新逻辑：
 1. 所有消息先尝试点击
 2. 检测是否唤起新窗口
 3. 根据窗口标题判断消息类型：
-   - 无窗口 → 文本消息
-   - "Photos and Videos" → 图片/视频
-   - 其他窗口 → 文件/链接/其他，保存到物理机
+   - 无窗口 → 文本消息 (text)
+   - "Photos and Videos" → 图片/视频 (photo/video)
+   - 其他窗口 → 文件/链接等，保存到物理机
 """
 
 import time
@@ -27,13 +30,11 @@ logger = logging.getLogger(__name__)
 
 
 class MessageType(str, Enum):
-    """消息类型"""
+    """消息类型（仅3种）"""
     TEXT = "text"
     PHOTO = "photo"
     VIDEO = "video"
-    FILE = "file"
-    LINK = "link"
-    OTHER = "other"
+    OTHER = "other"  # 用于内部标记，不通过SSE推送
 
 
 @dataclass
@@ -51,7 +52,11 @@ class ExtractedMessage:
     metadata: Dict[str, Any] = None
 
     def to_sse_json(self) -> str:
-        """转换为SSE JSONL格式"""
+        """转换为SSE JSONL格式（仅text/photo/video）"""
+        if self.msg_type == MessageType.OTHER:
+            # 其他类型不通过SSE推送
+            return ""
+
         sse_data = {
             "id": self.msg_id,
             "timestamp": self.timestamp,
@@ -96,17 +101,14 @@ class UniversalMessageExtractor:
         self.wechat_window = None
         self.current_window = None
 
-        # 保存目录结构
+        # 保存目录结构（仅photos/videos/others）
         self.save_dir = Path(save_dir)
         self.photos_dir = self.save_dir / "photos"
         self.videos_dir = self.save_dir / "videos"
-        self.files_dir = self.save_dir / "files"
-        self.links_dir = self.save_dir / "links"
         self.others_dir = self.save_dir / "others"
 
         # 创建目录
-        for dir_path in [self.photos_dir, self.videos_dir, self.files_dir,
-                         self.links_dir, self.others_dir]:
+        for dir_path in [self.photos_dir, self.videos_dir, self.others_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"消息提取器初始化，保存目录: {self.save_dir}")
@@ -311,34 +313,27 @@ class UniversalMessageExtractor:
 
     def determine_message_type(self, window_title: str) -> MessageType:
         """
-        根据窗口标题判断消息类型
+        根据窗口标题判断消息类型（仅text/photo/video）
 
         Args:
             window_title: 窗口标题
 
         Returns:
-            MessageType: 消息类型
+            MessageType: 消息类型（text/photo/video/other）
         """
         if not window_title:
             return MessageType.TEXT
 
         title_lower = window_title.lower()
 
-        # Photos and Videos窗口
+        # Photos and Videos窗口 → photo或video
         if any(keyword in title_lower for keyword in ['photos and videos', 'photos', 'videos']):
             # 需要进一步判断是图片还是视频
             # 这里先默认为PHOTO，后续可以根据内容判断
             return MessageType.PHOTO
 
-        # File Transfer窗口
-        if any(keyword in title_lower for keyword in ['file transfer', 'file']):
-            return MessageType.FILE
-
-        # Browser窗口
-        if any(keyword in title_lower for keyword in ['browser', 'chrome', 'firefox']):
-            return MessageType.LINK
-
-        # 其他窗口
+        # 其他窗口 → 标记为OTHER，保存到物理机
+        # 包括：File Transfer、Browser等
         return MessageType.OTHER
 
     def extract_media_from_window(self, window_info: Dict, msg_type: MessageType) -> Optional[str]:
@@ -356,17 +351,15 @@ class UniversalMessageExtractor:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             window_obj = window_info['obj']
 
-            # 生成文件名
+            # 生成文件名（仅photo/video）
             if msg_type == MessageType.PHOTO:
                 ext = '.png'
                 save_path = self.photos_dir / f"photo_{timestamp}{ext}"
             elif msg_type == MessageType.VIDEO:
                 ext = '.mp4'
                 save_path = self.videos_dir / f"video_{timestamp}{ext}"
-            elif msg_type == MessageType.FILE:
-                ext = '.bin'  # 默认扩展名
-                save_path = self.files_dir / f"file_{timestamp}{ext}"
             else:
+                # 其他类型保存到others目录
                 ext = '.dat'
                 save_path = self.others_dir / f"other_{timestamp}{ext}"
 
@@ -543,43 +536,52 @@ class UniversalMessageExtractor:
 
             logger.info(f"窗口标题: {window_title}, 消息类型: {msg_type.value}")
 
-            # 步骤5: 提取媒体（如需要）
+            # 步骤5: 处理不同类型的消息
             high_res_path = None
             extracted_at = datetime.now().isoformat()
 
-            if msg_type in [MessageType.PHOTO, MessageType.VIDEO, MessageType.FILE, MessageType.OTHER]:
+            if msg_type == MessageType.OTHER:
+                # 其他类型：保存到物理机，不返回消息对象
+                self._save_other_type_to_disk(window_title, sender, new_window)
+                self.close_window(new_window['obj'])
+                return None
+
+            elif msg_type in [MessageType.PHOTO, MessageType.VIDEO]:
+                # photo/video：提取媒体文件
                 high_res_path = self.extract_media_from_window(new_window, msg_type)
 
             # 步骤6: 关闭窗口
             self.close_window(new_window['obj'])
 
-            # 构造消息对象
-            metadata = {
-                "producer": "universal_extractor",
-                "production_mode": "atspi",
-                "processed_at": processed_at,
-                "extracted_at": extracted_at,
-                "window_opened": True
-            }
+            # 步骤7: 构造消息对象（仅text/photo/video）
+            if msg_type in [MessageType.TEXT, MessageType.PHOTO, MessageType.VIDEO]:
+                metadata = {
+                    "producer": "universal_extractor",
+                    "production_mode": "visual",
+                    "processed_at": processed_at,
+                    "extracted_at": extracted_at,
+                    "window_opened": True
+                }
 
-            if high_res_path:
-                metadata["save_path"] = high_res_path
+                if high_res_path:
+                    metadata["save_path"] = high_res_path
 
-            content_text = f"[{msg_type.value.upper()}]"
-            if msg_type == MessageType.FILE:
-                content_text = f"[File] {os.path.basename(high_res_path) if high_res_path else 'Unknown'}"
+                content_text = f"[{msg_type.value.upper()}]"
 
-            return ExtractedMessage(
-                msg_id=msg_id,
-                timestamp=timestamp,
-                msg_type=msg_type,
-                sender=sender,
-                content_text=content_text,
-                high_res_media_path=high_res_path,
-                window_detected=True,
-                window_title=window_title,
-                metadata=metadata
-            )
+                return ExtractedMessage(
+                    msg_id=msg_id,
+                    timestamp=timestamp,
+                    msg_type=msg_type,
+                    sender=sender,
+                    content_text=content_text,
+                    high_res_media_path=high_res_path,
+                    window_detected=True,
+                    window_title=window_title,
+                    metadata=metadata
+                )
+            else:
+                # 不支持的消息类型
+                return None
 
         except Exception as e:
             logger.error(f"提取消息失败: {e}", exc_info=True)
@@ -598,11 +600,51 @@ class UniversalMessageExtractor:
             window_title=None,
             metadata={
                 "producer": "universal_extractor",
-                "production_mode": "atspi",
+                "production_mode": "visual",
                 "processed_at": processed_at,
                 "window_opened": False
             }
         )
+
+    def _save_other_type_to_disk(self, window_title: str, sender: str, window_info: Dict):
+        """
+        将其他类型消息（文件、链接等）保存到物理机
+
+        Args:
+            window_title: 窗口标题
+            sender: 发送者
+            window_info: 窗口信息
+        """
+        try:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            save_path = self.others_dir / f"other_{timestamp}.json"
+
+            # 判断类型
+            msg_type = "unknown"
+            if "file" in window_title.lower():
+                msg_type = "file"
+            elif "browser" in window_title.lower() or "link" in window_title.lower():
+                msg_type = "link"
+
+            # 尝试提取更多信息
+            file_path = self._find_file_path_in_window(window_info['obj'])
+
+            # 保存元数据
+            data = {
+                'type': msg_type,
+                'sender': sender,
+                'window_title': window_title,
+                'file_path': file_path,
+                'timestamp': datetime.now().isoformat()
+            }
+
+            with open(save_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"其他类型消息已保存到物理机: type={msg_type}, path={save_path}")
+
+        except Exception as e:
+            logger.error(f"保存其他类型消息到磁盘失败: {e}", exc_info=True)
 
 
 # 测试代码

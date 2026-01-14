@@ -60,3 +60,4 @@ htmlcov/
 *.bak
 *.swp
 .DS_Store
+*.tar.gz

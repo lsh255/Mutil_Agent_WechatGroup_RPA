@@ -7,6 +7,11 @@
 - **主要方案（推荐）**：AT-SPI UI控件监听 - 更稳定、更准确、资源占用更少
 - **兜底方案**：视觉技术 - 当AT-SPI不可用时自动降级
 
+**重要文档**：
+- 📄 **AT-SPI vs 视觉方案对比**：`../services/wechat_sandbox/AT_SPI_VS_VISUAL_COMPARISON.md` - 详细对比两种方案的区别、性能、使用场景
+- 📄 **视觉方案实现**：`../services/wechat_sandbox/core/producer/UNIVERSAL_MESSAGE_EXTRACTION.md` - 视觉方案的具体实现
+- 📄 **AT-SPI观察者**：`../services/wechat_sandbox/core/atspi/observer.py` - AT-SPI方案的核心代码
+
 ## 🎯 方案对比
 
 | 特性 | AT-SPI UI控件 | 视觉技术 | 说明 |

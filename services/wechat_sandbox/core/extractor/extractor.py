@@ -12,7 +12,7 @@ import numpy as np
 import subprocess
 import mss
 from utils.logger import logger
-from utils.config import config
+from config.config import config
 from ..platform.adapter import get_adapter
 
 class MessageExtractor:

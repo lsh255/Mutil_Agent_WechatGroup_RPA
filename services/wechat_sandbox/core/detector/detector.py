@@ -8,7 +8,7 @@
 import cv2
 import numpy as np
 from utils.logger import logger
-from utils.config import config
+from config.config import config
 
 
 class ChangeDetector:

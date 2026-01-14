@@ -28,29 +28,35 @@ Mutil_Agent_WechatGroup_RPA/
 └── pyproject.toml       # Python项目配置
 ```
 
-### 微信沙盒目录结构（2025-01-12更新）
+### 微信沙盒目录结构（2025-01-14更新）
 ```
 services/wechat_sandbox/
 ├── core/                            # 核心业务逻辑
-│   ├── atspi/                       # AT-SPI模块 ⭐ 新结构
+│   ├── atspi/                       # AT-SPI模块 ⭐
 │   │   ├── observer.py              # AT-SPI观察者
 │   │   ├── chat_listener.py         # 聊天窗口监听器
 │   │   └── global_listener.py       # 全局聊天监听器
-│   ├── message/                     # 消息处理模块 ⭐ 新结构
-│   │   ├── extractor.py             # 通用消息提取器
+│   ├── extractor/                   # 消息提取模块 ⭐ 整合
+│   │   ├── message_extractor.py     # 通用消息提取器
 │   │   └── models.py                # 消息数据模型
-│   ├── window/                      # 窗口管理模块 ⭐ 新结构
-│   ├── producer/                    # 生产者模块
+│   ├── producer/                    # 生产者模块（简化）
 │   │   ├── hybrid_producer.py       # 混合生产者（AT-SPI + 视觉）
-│   │   ├── observer.py              # 视觉观察者
-│   │   └── content_fetcher.py       # 内容提取器
-│   ├── detector/                    # 视觉检测模块
-│   └── extractor/                   # 内容提取模块
+│   │   └── consumer.py              # 消费者
+│   └── detector/                    # 视觉检测模块
+├── config/                          # 配置管理 ⭐ 独立
+│   ├── config.py                    # 配置类
+│   ├── config.yaml                  # 配置文件
+│   └── config.production.yaml       # 生产配置
+├── docs/                            # 文档 ⭐ 整合
+│   ├── ARCHITECTURE.md              # 架构文档
+│   ├── MESSAGE_TYPES.md             # 消息类型说明
+│   ├── AT_SPI_GUIDE.md              # AT-SPI指南
+│   └── DIRECTORY_STRUCTURE.md       # 目录结构
 ├── api/                             # FastAPI接口
 └── utils/                           # 工具类
 ```
 
-详细说明见：`services/wechat_sandbox/DIRECTORY_STRUCTURE.md`
+详细说明见：`services/wechat_sandbox/DIRECTORY_STRUCTURE_V2.md`
 
 ## 开发规则（必须遵守）
 
@@ -101,18 +107,24 @@ services/wechat_sandbox/
 - 日志级别：ERROR（功能异常）、WARN（潜在问题）、INFO（关键业务节点）、DEBUG（调试信息）
 - 必须添加日志的位置：try-catch的catch块、外部调用前后、业务入口、状态变更、重要条件分支
 
-### 导入路径规范（2025-01-12更新）
+### 导入路径规范（2025-01-14更新）
 ```python
-# AT-SPI相关（新路径）
+# AT-SPI相关
 from core.atspi.observer import ATSPIObserver
 from core.atspi.chat_listener import ChatWindowListener
 from core.atspi.global_listener import GlobalChatListener
 
-# 消息处理（新路径）
-from core.message.extractor import UniversalMessageExtractor, MessageType
+# 消息提取（统一）
+from core.extractor import UniversalMessageExtractor, MessageType, ExtractedMessage
 
-# 生产者（更新路径）
+# 生产者
 from core.producer.hybrid_producer import HybridProducer, ProductionMode
+from core.producer.consumer import AgentConsumer
+
+# 配置（独立）
+from config.config import config
+# 或
+from config import config
 ```
 
 ## 架构约定
@@ -134,41 +146,41 @@ from core.producer.hybrid_producer import HybridProducer, ProductionMode
 - 点击所有消息判断类型（不预判）
 - 根据窗口标题自动分类
 - 文件自动保存到物理机
-- 支持类型：text、photo、video、file、link、other
+- **仅支持3种消息类型**：text、photo、video
+- 其他类型（file、link、表情包等）直接保存到物理机，不推送SSE
 
-### 通用消息提取工作流程（2025-01-12新增）
+### 通用消息提取工作流程（2025-01-14更新）
 ```
 1. 检测新消息（AT-SPI观察者）
    ↓
 2. 点击消息（所有消息）
    ↓
 3. 检测是否唤起新窗口
-   ├─ 否 → 文本消息 (text)
+   ├─ 否 → 文本消息 (text) → 推送SSE
    └─ 是 → 继续判断
            ↓
        获取窗口标题
            ↓
-       ├─ "Photos and Videos" → 图片/视频 (photo/video)
-       ├─ "File Transfer" → 文件 (file)
-       ├─ "Browser" → 链接 (link)
-       └─ 其他 → 其他类型 (other)
-                  ↓
-              保存到物理机 (/host/data/)
-                  ↓
-              推送SSE (JSONL格式)
+       ├─ "Photos and Videos" → 图片/视频 (photo/video) → 推送SSE
+       ├─ "File Transfer" → 保存到物理机 → 不推送SSE
+       ├─ "Browser" → 保存到物理机 → 不推送SSE
+       └─ 其他 → 保存到物理机 → 不推送SSE
 ```
 
-### SSE消息格式（2025-01-12更新）
+### SSE消息格式（2025-01-14更新）
 - **格式**：JSONL（JSON Lines），每行一个完整JSON对象
 - **编码**：UTF-8
 - **前缀**：`data: `
-- **示例**：
-  ```
-  data: {"id":"msg_001","type":"text","sender":"张三","content":{"text":"hello"},"window_detected":false,...}
-  data: {"id":"msg_002","type":"photo","sender":"李四","content":{"high_res_media_path":"/host/data/photo.png"},"window_detected":true,...}
-  ```
+- **支持的消息类型**：仅text、photo、video
+- **其他类型**：保存到物理机，不推送SSE
 
-完整数据模型见：`services/wechat_sandbox/core/producer/SSE_MESSAGE_MODEL.md`
+**示例**：
+```
+data: {"id":"msg_001","type":"text","sender":"张三","content":{"text":"hello"},"window_detected":false,...}
+data: {"id":"msg_002","type":"photo","sender":"李四","content":{"high_res_media_path":"/host/data/photo.png"},"window_detected":true,...}
+```
+
+完整数据模型见：`services/wechat_sandbox/docs/MESSAGE_TYPES.md`
 
 ### Orchestrator-Worker架构模式
 - Orchestrator：LangGraph工作流引擎负责任务编排和状态管理

@@ -67,7 +67,7 @@ class ATSPIObserver:
         # 延迟初始化通用消息提取器
         if enable_universal_extraction:
             try:
-                from core.message.extractor import UniversalMessageExtractor
+                from core.extractor import UniversalMessageExtractor
                 self.universal_extractor = UniversalMessageExtractor(save_dir=save_dir)
                 logger.info("通用消息提取器已启用")
             except ImportError as e:
@@ -239,13 +239,20 @@ class ATSPIObserver:
 
     def _extract_message_from_item(self, item) -> Optional[ATSPIMessage]:
         """
-        从消息项中提取消息内容（新逻辑：点击所有消息判断类型）
+        从消息项中提取消息内容（仅处理3种类型：文本、图片、视频）
+
+        工作原理：
+        - 监听UI控件树，从控件属性中判断消息类型
+        - 文本：ROLE_TEXT/ROLE_LABEL控件
+        - 图片：ROLE_IMAGE/ROLE_ICON控件，或有图片路径属性
+        - 视频：有视频时长、缩略图等属性
+        - 其他类型（文件、链接、表情包等）：直接保存到物理机，不推送SSE
 
         Args:
             item: AT-SPI可访问对象（消息项）
 
         Returns:
-            ATSPIMessage: 提取的消息，如果提取失败返回None
+            ATSPIMessage: 提取的消息（仅text/photo/video），如果类型不支持返回None
         """
         try:
             import pyatspi
@@ -256,83 +263,188 @@ class ATSPIObserver:
             image_path = None
             high_res_image_path = None
 
-            # 步骤1: 提取发送者和基本文本内容
-            def extract_text_recursive(acc, depth: int = 0):
-                nonlocal sender, content
+            # 用于标记是否需要保存其他类型到物理机
+            other_type_data = None
+
+            # 步骤1: 提取消息的所有信息
+            def extract_content_recursive(acc, depth: int = 0):
+                nonlocal sender, content, message_type, image_path, high_res_image_path, other_type_data
 
                 if depth > 15:
                     return
 
                 try:
                     role = acc.getRole()
+                    role_name = acc.getRoleName()
                     name = acc.name or ""
-                    text = ""
 
-                    # 如果是文本控件，获取文本内容
+                    # 获取控件属性
+                    attributes = {}
+                    try:
+                        attrs = acc.getAttributes()
+                        if attrs:
+                            for attr in attrs:
+                                if '=' in attr:
+                                    key, value = attr.split('=', 1)
+                                    attributes[key.lower()] = value
+                    except:
+                        pass
+
+                    # ===== 1. 文本控件 =====
                     if role == pyatspi.ROLE_TEXT:
                         try:
                             text_iface = acc.queryText()
                             if text_iface:
                                 text = text_iface.getText(0, text_iface.characterCount)
+                                if text and len(text) > 0:
+                                    # 判断是发送者还是消息内容
+                                    if len(text) < 20 and '\n' not in text and not sender:
+                                        sender = text
+                                    else:
+                                        content = text
                         except:
-                            text = acc.name or ""
+                            if name:
+                                content = name
 
+                    # ===== 2. 标签控件 =====
                     elif role == pyatspi.ROLE_LABEL:
-                        text = acc.name or ""
+                        if name:
+                            if len(name) < 20 and '\n' not in name and not sender:
+                                sender = name
+                            elif not content:
+                                content = name
 
-                    # 根据角色和内容判断是发送者还是消息内容
-                    if text:
-                        if len(text) < 20 and '\n' not in text and not sender:
-                            sender = text
-                        elif len(text) > 0:
-                            content = text
+                    # ===== 3. 图片/图标控件（photo） =====
+                    elif role in [pyatspi.ROLE_IMAGE, pyatspi.ROLE_ICON,
+                                  pyatspi.ROLE_GRAPHIC, pyatspi.ROLE_PICTURE]:
+                        message_type = "photo"
+                        # 尝试获取图片路径
+                        if name and ('/' in name or '\\' in name):
+                            image_path = name
+                        # 从属性中获取路径
+                        if 'image-path' in attributes:
+                            image_path = attributes['image-path']
+                        elif 'src' in attributes:
+                            image_path = attributes['src']
+                        # 设置描述
+                        if not content:
+                            content = f"[图片]"
+
+                    # ===== 4. 视频控件 =====
+                    elif role == pyatspi.ROLE_VIDEO:
+                        message_type = "video"
+                        # 尝试获取视频路径
+                        if name and ('/' in name or '\\' in name):
+                            high_res_image_path = name  # 复用字段存储视频路径
+                        # 从属性中获取路径
+                        if 'video-path' in attributes:
+                            high_res_image_path = attributes['video-path']
+                        # 设置描述
+                        if not content:
+                            duration = attributes.get('duration', '')
+                            content = f"[视频{duration}]" if duration else "[视频]"
+
+                    # ===== 5. 文档/文件控件（判断是photo/video/other） =====
+                    elif role in [pyatspi.ROLE_DOCUMENT, pyatspi.ROLE_FILE]:
+                        # 判断是图片、视频还是其他
+                        if any(ext in (name or '').lower() for ext in ['.jpg', '.png', '.gif', '.bmp', '.webp', '.jpeg']):
+                            message_type = "photo"
+                            high_res_image_path = name
+                        elif any(ext in (name or '').lower() for ext in ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm']):
+                            message_type = "video"
+                            high_res_image_path = name
+                            if not content:
+                                content = f"[视频]"
+                        else:
+                            # 其他类型（文件、链接等）：标记为other_type，保存到物理机
+                            message_type = "other"
+                            other_type_data = {
+                                'type': 'file',
+                                'name': name,
+                                'attributes': attributes
+                            }
+
+                    # ===== 6. 链接控件（标记为other_type） =====
+                    elif role in [pyatspi.ROLE_LINK, pyatspi.ROLE_HYPERLINK]:
+                        message_type = "other"
+                        url = name or attributes.get('url', attributes.get('href', ''))
+                        other_type_data = {
+                            'type': 'link',
+                            'url': url,
+                            'attributes': attributes
+                        }
+
+                    # ===== 7. 通过属性判断消息类型 =====
+                    # 检查是否有图片属性
+                    if 'image' in attributes or 'thumbnail' in attributes:
+                        message_type = "photo"
+                        if 'thumbnail' in attributes:
+                            image_path = attributes['thumbnail']
+                        if 'image-path' in attributes:
+                            high_res_image_path = attributes['image-path']
+
+                    # 检查是否有视频属性
+                    if 'video' in attributes or 'duration' in attributes:
+                        message_type = "video"
+                        if 'video-path' in attributes:
+                            high_res_image_path = attributes['video-path']
+                        if not content:
+                            duration = attributes.get('duration', '')
+                            content = f"[视频{duration}]" if duration else "[视频]"
 
                     # 递归处理子节点
                     for i in range(acc.childCount):
-                        extract_text_recursive(acc.getChildAtIndex(i), depth + 1)
+                        extract_content_recursive(acc.getChildAtIndex(i), depth + 1)
 
                 except Exception as e:
-                    logger.debug(f"提取文本时出错: {e}")
+                    logger.debug(f"提取内容时出错 (depth={depth}): {e}")
 
-            # 提取基本文本信息
-            extract_text_recursive(item)
+            # 提取消息内容
+            extract_content_recursive(item)
 
-            # 步骤2: 如果启用了通用提取器，使用新逻辑
-            if self.enable_universal_extraction and self.universal_extractor:
+            # 步骤2: 处理其他类型消息（文件、链接等）
+            # 如果是其他类型，直接保存到物理机，不推送SSE
+            if message_type == "other" and other_type_data:
                 try:
-                    # 异步提取（避免阻塞消息流）
-                    import threading
-
-                    def extract_async():
-                        try:
-                            extracted = self.universal_extractor.extract_message(item, sender or "Unknown")
-                            if extracted:
-                                logger.info(
-                                    f"通用提取: type={extracted.msg_type.value}, "
-                                    f"window={extracted.window_title}, "
-                                    f"path={extracted.high_res_media_path}"
-                                )
-                                # 可以通过回调或其他方式通知提取完成
-                        except Exception as e:
-                            logger.error(f"异步提取失败: {e}")
-
-                    # 启动后台线程
-                    thread = threading.Thread(target=extract_async, daemon=True)
-                    thread.start()
-
-                    # 先返回基本信息，后续可以更新
-                    message_type = "text"  # 初始类型，异步提取后会更新
-                    if "[Photo]" in content or "[Image]" in content:
-                        message_type = "photo"
-
+                    self._save_other_type_to_disk(sender, other_type_data)
+                    logger.info(f"其他类型消息已保存到物理机: type={other_type_data['type']}, sender={sender}")
+                    return None  # 不推送SSE
                 except Exception as e:
-                    logger.error(f"通用提取失败: {e}")
+                    logger.error(f"保存其他类型消息失败: {e}")
+                    return None
 
-            # 步骤3: 构造消息对象
-            if content:
+            # 步骤3: [可选] 如果需要提取高清媒体文件，使用视觉方案
+            # 注意：仅对photo/video类型启用视觉提取
+            if self.enable_universal_extraction and self.universal_extractor:
+                # 仅当需要保存文件时才使用视觉提取
+                if message_type in ["photo", "video"] and not high_res_image_path:
+                    try:
+                        import threading
+
+                        def extract_media_async():
+                            try:
+                                extracted = self.universal_extractor.extract_message(item, sender or "Unknown")
+                                if extracted and extracted.high_res_media_path:
+                                    logger.info(
+                                        f"媒体文件已保存: type={extracted.msg_type.value}, "
+                                        f"path={extracted.high_res_media_path}"
+                                    )
+                                    # TODO: 可以通过回调或其他方式通知文件保存完成
+                            except Exception as e:
+                                logger.error(f"异步媒体提取失败: {e}")
+
+                        # 启动后台线程提取媒体文件
+                        thread = threading.Thread(target=extract_media_async, daemon=True)
+                        thread.start()
+
+                    except Exception as e:
+                        logger.error(f"启动媒体提取失败: {e}")
+
+            # 步骤4: 构造消息对象（仅text/photo/video）
+            if message_type in ["text", "photo", "video"]:
                 message = ATSPIMessage(
                     sender=sender or "Unknown",
-                    content=content,
+                    content=content or f"[{message_type.upper()}]",
                     timestamp=datetime.now().isoformat(),
                     message_type=message_type,
                     image_path=image_path,
@@ -341,11 +453,66 @@ class ATSPIObserver:
                 )
                 return message
             else:
+                # 不支持的消息类型，不推送SSE
                 return None
 
         except Exception as e:
-            logger.error(f"从消息项提取内容失败: {e}")
+            logger.error(f"从消息项提取内容失败: {e}", exc_info=True)
             return None
+
+    def _save_other_type_to_disk(self, sender: str, other_type_data: dict):
+        """
+        将其他类型消息（文件、链接等）保存到物理机
+
+        Args:
+            sender: 发送者
+            other_type_data: 其他类型数据
+        """
+        try:
+            from pathlib import Path
+            import json
+            from datetime import datetime
+
+            # 保存目录
+            save_dir = Path(self.save_dir) / "others"
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+            # 生成文件名
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            msg_type = other_type_data.get('type', 'unknown')
+
+            if msg_type == 'link':
+                # 保存链接元数据
+                filename = f"link_{timestamp}.json"
+                filepath = save_dir / filename
+                data = {
+                    'type': 'link',
+                    'sender': sender,
+                    'url': other_type_data.get('url', ''),
+                    'timestamp': datetime.now().isoformat(),
+                    'attributes': other_type_data.get('attributes', {})
+                }
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info(f"链接已保存: {filepath}")
+
+            elif msg_type == 'file':
+                # 保存文件元数据
+                filename = f"file_{timestamp}.json"
+                filepath = save_dir / filename
+                data = {
+                    'type': 'file',
+                    'sender': sender,
+                    'name': other_type_data.get('name', ''),
+                    'timestamp': datetime.now().isoformat(),
+                    'attributes': other_type_data.get('attributes', {})
+                }
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info(f"文件元数据已保存: {filepath}")
+
+        except Exception as e:
+            logger.error(f"保存其他类型消息到磁盘失败: {e}", exc_info=True)
 
     def check_new_messages(self) -> List[ATSPIMessage]:
         """

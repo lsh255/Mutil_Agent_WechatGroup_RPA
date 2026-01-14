@@ -2,7 +2,7 @@ import os  # 操作系统接口模块
 import subprocess  # 子进程管理模块
 import asyncio  # 异步 I/O 模块
 from api import app  # 导入 FastAPI 应用实例
-from utils.config import config  # 配置模块
+from config.config import config  # 配置模块
 from utils.logger import logger  # 日志记录模块
 import uvicorn  # ASGI 服务器
 

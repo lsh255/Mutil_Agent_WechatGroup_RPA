@@ -31,7 +31,7 @@ class TestATSPIObserver:
     @pytest.fixture
     def observer(self):
         """创建ATSPIObserver实例"""
-        from services.wechat_sandbox.core.producer.atspi_observer import ATSPIObserver
+        from services.wechat_sandbox.core.atspi.observer import ATSPIObserver
         return ATSPIObserver()
 
     def test_initialization_without_atspi(self, observer):
@@ -110,7 +110,7 @@ class TestATSPIObserver:
 
     def test_message_callback_invocation(self, observer):
         """测试回调函数调用"""
-        from services.wechat_sandbox.core.producer.atspi_observer import ATSPIMessage
+        from services.wechat_sandbox.core.atspi.observer import ATSPIMessage
 
         callback = Mock()
         observer.add_callback(callback)
@@ -192,7 +192,7 @@ class TestATSPIMessage:
 
     def test_message_creation(self):
         """测试消息创建"""
-        from services.wechat_sandbox.core.producer.atspi_observer import ATSPIMessage
+        from services.wechat_sandbox.core.atspi.observer import ATSPIMessage
         from datetime import datetime
 
         message = ATSPIMessage(
@@ -230,7 +230,7 @@ class TestIntegration:
     )
     def test_full_workflow(self):
         """测试完整工作流程"""
-        from services.wechat_sandbox.core.producer.atspi_observer import ATSPIObserver
+        from services.wechat_sandbox.core.atspi.observer import ATSPIObserver
         from services.wechat_sandbox.core.producer.hybrid_producer import HybridProducer, ProductionMode
         import redis
 

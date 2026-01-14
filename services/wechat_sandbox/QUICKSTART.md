@@ -1,31 +1,34 @@
 # 微信沙箱快速启动指南
 
-## 目录结构说明
+## 目录结构说明（v2.0）
 
 | 文件/目录 | 用途 |
 |-----------|------|
 | [docker/sandbox/Dockerfile](../../docker/sandbox/Dockerfile) | 生产环境基础镜像（分层设计） |
-| [docker/sandbox/Dockerfile.test](../../docker/sandbox/Dockerfile.test) | 测试环境镜像（添加 FastAPI） |
+| [docker/sandbox/Dockerfile.test](../../docker/sandbox/Dockerfile.test) | 测试环境镜像（添加 FastAPI + AT-SPI） |
 | [docker/compose/docker-compose.yml](../../docker/compose/docker-compose.yml) | 生产单实例部署 |
 | [docker/compose/docker-compose.multi.yml](../../docker/compose/docker-compose.multi.yml) | 生产多实例部署（3 个实例） |
-| [docker/compose/docker-compose.sandbox.test.yml](../../docker/compose/docker-compose.sandbox.test.yml) | 测试单实例部署（含 FastAPI） |
+| [docker/compose/docker-compose.sandbox.test.yml](../../docker/compose/docker-compose.sandbox.test.yml) | 测试单实例部署（含 FastAPI + AT-SPI） |
 | [main.py](./main.py) | 主启动脚本 |
-| [backup_start.py](./backup_start.py) | 备用启动脚本 |
 | [docker/scripts/start_wechat.sh](../../docker/scripts/start_wechat.sh) | 微信沙箱启动脚本（Xvfb、Fluxbox、noVNC、WeChat） |
-| [docker/scripts/start_wechat_sandbox.bat](../../docker/scripts/start_wechat_sandbox.bat) | Windows 启动脚本 |
 | [requirements.txt](./requirements.txt) | Python 依赖列表 |
-| [api/](./api/) | API 模块（FastAPI 应用、路由、配置管理） |
-| [core/](./core/) | 核心业务逻辑模块（消息监控、提取、分类、队列管理） |
-| [core/detector/](./core/detector/) | 变化检测模块（dHash、气泡检测、屏幕变化） |
-| [core/extractor/](./core/extractor/) | 内容提取模块（文本提取、媒体截图） |
-| [core/producer/](./core/producer/) | 生产者模块（Observer、ContentFetcher、AgentConsumer） |
-| [core/queue/](./core/queue/) | Redis Stream 队列管理 |
-| [core/classifier/](./core/classifier/) | 消息类型分类器（文本/图片/视频/链接） |
-| [core/platform/](./core/platform/) | 平台适配模块（跨平台支持） |
-| [utils/](./utils/) | 工具模块（配置、日志） |
+| [config/](./config/) | ⭐ 配置管理（独立） |
+| [config/config.yaml](./config/config.yaml) | 开发环境配置 |
+| [config/config.production.yaml](./config/config.production.yaml) | 生产环境配置 |
+| [api/](./api/) | FastAPI 接口模块（健康检查、SSE 流、实例管理） |
+| [core/](./core/) | 核心业务逻辑模块 |
+| [core/atspi/](./core/atspi/) | ⭐ AT-SPI 模块（观察者、聊天监听器） |
+| [core/extractor/](./core/extractor/) | ⭐ 消息提取模块（通用提取器、数据模型） |
+| [core/producer/](./core/producer/) | 生产者模块（混合生产者、消费者） |
+| [core/detector/](./core/detector/) | 视觉检测模块（变化检测、视觉监控） |
+| [utils/](./utils/) | 工具模块（日志、平台适配） |
+| [docs/](./docs/) | ⭐ 详细文档（架构、AT-SPI、消息类型） |
+| [docs/INDEX.md](./docs/INDEX.md) | 文档索引导航 |
 | [tests/](./tests/) | 单元测试和集成测试 |
-| [services/](./services/) | 服务模块 |
+| [services/](./services/) | 服务模块（生产者服务） |
 | [archive/](./archive/) | 归档文件 |
+
+> 💡 **v2.0 更新**：目录结构已重整，详见 [DIRECTORY_STRUCTURE_V2.md](./DIRECTORY_STRUCTURE_V2.md)
 
 ## 准备工作
 
@@ -282,6 +285,17 @@ tar czf media_backup.tar.gz ./media
 
 ## 相关文档
 
-- [README.md](./README.md) - 项目总览
-- [WECHAT_SANDBOX.md](./WECHAT_SANDBOX.md) - WeChat 沙箱详细说明
+### 核心文档
+- [README.md](./README.md) - 项目总览 ⭐ v2.0
+- [DIRECTORY_STRUCTURE_V2.md](./DIRECTORY_STRUCTURE_V2.md) - 目录结构详细说明 ⭐ v2.0
+- [CHANGELOG_v2.0.md](./CHANGELOG_v2.0.md) - 变更日志 ⭐ v2.0
+
+### 详细文档
+- [docs/INDEX.md](./docs/INDEX.md) - 文档索引导航 ⭐ 新建
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) - 架构设计文档
+- [docs/AT_SPI_GUIDE.md](./docs/AT_SPI_GUIDE.md) - AT-SPI 使用指南
+- [docs/MESSAGE_TYPES.md](./docs/MESSAGE_TYPES.md) - 消息类型说明（3种类型）
+
+### 其他文档
+- [tests/README.md](./tests/README.md) - 测试指南
 - [archive/README.md](./archive/README.md) - 归档文件说明

@@ -9,7 +9,11 @@
       "WebSearch",
       "Bash(docker.exe cp:*)",
       "Bash(docker.exe exec:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(python3:*)",
+      "Bash(PYTHONPATH=. python3:*)",
+      "Bash(python:*)",
+      "Bash(find:*)"
     ]
   }
 }

@@ -14,7 +14,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from utils.logger import logger
-from utils.config import config
+from config.config import config
 
 class Classifier:
     """

@@ -15,7 +15,7 @@ from api.health import router as health_router, set_components
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.logger import logger
-from utils.config import config
+from config.config import config
 
 queue_manager = None
 producer1 = None
