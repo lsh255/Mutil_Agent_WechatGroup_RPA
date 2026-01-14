@@ -1,21 +1,57 @@
 """
-配置管理API路由
+配置管理API路由（v2.0）
 """
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Dict, Any, Optional
 import yaml
 from pathlib import Path
 import sys
 import os
+import logging
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from utils.logger import logger
+
+# 使用标准 logging，避免依赖问题
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 CONFIG_FILE = Path(__file__).parent.parent / "config.yaml"
+
+
+class ROIModel(BaseModel):
+    """ROI 模型（用于测试和 API）"""
+    left: int = Field(..., ge=0, description="左边界")
+    top: int = Field(..., ge=0, description="上边界")
+    right: int = Field(..., gt=0, description="右边界")
+    bottom: int = Field(..., gt=0, description="下边界")
+
+    @field_validator('right', 'bottom')
+    @classmethod
+    def validate_positive(cls, v):
+        """验证必须为正数"""
+        if v <= 0:
+            raise ValueError('必须为正数')
+        return v
+
+    @field_validator('left', 'top')
+    @classmethod
+    def validate_non_negative(cls, v):
+        """验证不能为负数"""
+        if v < 0:
+            raise ValueError('不能为负数')
+        return v
+
+    @model_validator(mode='after')
+    def validate_coordinates(self):
+        """验证坐标顺序"""
+        if self.left >= self.right:
+            raise ValueError('左边界必须小于右边界')
+        if self.top >= self.bottom:
+            raise ValueError('上边界必须小于下边界')
+        return self
 
 
 class ROIUpdate(BaseModel):

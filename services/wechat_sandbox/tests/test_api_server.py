@@ -194,15 +194,17 @@ class TestAPIModels:
         """
         from pydantic import ValidationError
         from api.config import ROIModel
-        
+
         invalid_data = {
             "left": 500,
             "top": 200,
             "right": 100,
             "bottom": 800
         }
-        
-        ROIModel(**invalid_data)
+
+        # 应该抛出 ValidationError
+        with pytest.raises(ValidationError):
+            ROIModel(**invalid_data)
     
     def test_missing_field_validation(self):
         """
